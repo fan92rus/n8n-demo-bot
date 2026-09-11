@@ -62,6 +62,10 @@
   <div class="card">
     <b>Мои записи</b> <a href="#" id="my-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
     <div id="my-id" class="muted" style="font-size:11px;margin-top:4px"></div>
+    <div style="margin-top:4px">
+      <input id="my-input" placeholder="@username" style="display:none;background:#1e2c44;border:1px solid #2a3a55;color:#e8eef7;border-radius:6px;padding:4px 8px;font-size:12px">
+      <a id="my-save" href="#" style="display:none;font-size:12px;color:#64b5f6;margin-left:6px">запомнить</a>
+    </div>
     <div id="my" class="muted" style="margin-top:6px">…</div>
   </div>
 
@@ -87,13 +91,35 @@ function detectUser() {
   } catch (e) {}
   return false;
 }
-// initDataUnsafe в некоторых клиентах приходит с задержкой — ждём до 1с
+// из прошлой сессии — сразу, Telegram ждать не заставляем
+const savedUser = localStorage.getItem('mm_user');
+if (savedUser) user = savedUser;
+
+function guestUI(on) {
+  $('my-input').style.display = on ? '' : 'none';
+  $('my-save').style.display = on ? '' : 'none';
+}
+// initDataUnsafe при открытии из reply-кнопки может приходить с большой задержкой — ждём до 5с
 if (!detectUser()) {
   let tries = 0;
   const t = setInterval(() => {
-    if (detectUser() || ++tries >= 5) { clearInterval(t); loadMy(); loadLeads(); }
+    if (detectUser() || ++tries >= 25) {
+      clearInterval(t);
+      if (user === 'гость') guestUI(true); else localStorage.setItem('mm_user', user);
+      loadMy(); loadLeads();
+    }
   }, 200);
 }
+$('my-save').onclick = ev => {
+  ev.preventDefault();
+  let v = $('my-input').value.trim();
+  if (!v) return;
+  if (!v.startsWith('@') && !/^\d+$/.test(v)) v = '@' + v;
+  user = v;
+  localStorage.setItem('mm_user', v);
+  guestUI(false);
+  loadMy(); loadLeads();
+};
 
 const $ = id => document.getElementById(id);
 
