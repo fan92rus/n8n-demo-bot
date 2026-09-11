@@ -17,10 +17,13 @@ import sys
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
+    BotCommand,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
 )
 
 from bot.config import BOT_TOKEN, N8N_BASE_URL, N8N_TIMEOUT
@@ -41,6 +44,28 @@ WELCOME = (
     "• /book <id> — записаться"
 )
 
+# Постоянное меню-клавиатура (кнопки под полем ввода)
+BTN_CLASSIFY = "🧾 Классификация"
+BTN_SLOTS = "📅 Слоты"
+BTN_HELP = "ℹ️ Помощь"
+
+MENU_KB = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text=BTN_CLASSIFY), KeyboardButton(text=BTN_SLOTS)],
+        [KeyboardButton(text=BTN_HELP)],
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Текст заявки можно писать прямо сюда",
+)
+
+BOT_COMMANDS = [
+    BotCommand(command="start", description="Меню"),
+    BotCommand(command="classify", description="Классификация заявки"),
+    BotCommand(command="slots", description="Свободные слоты"),
+    BotCommand(command="book", description="Запись: /book <id>"),
+    BotCommand(command="help", description="Помощь"),
+]
+
 
 async def safe_answer(m: Message, text: str) -> None:
     """Ответ с подавлением сетевых сбоев, чтобы воркер не падал."""
@@ -53,6 +78,7 @@ async def safe_answer(m: Message, text: str) -> None:
 @dp.message(Command("start"))
 async def cmd_start(m: Message) -> None:
     await safe_answer(m, WELCOME)
+    await m.answer("Меню всегда под клавиатурой 👇", reply_markup=MENU_KB)
 
 
 @dp.message(Command("help"))
@@ -81,6 +107,25 @@ async def cmd_classify(m: Message, command: CommandObject) -> None:
 
 @dp.message(Command("slots"))
 async def cmd_slots(m: Message) -> None:
+    await show_slots(m)
+
+
+@dp.message(F.text == BTN_SLOTS)
+async def btn_slots(m: Message) -> None:
+    await show_slots(m)
+
+
+@dp.message(F.text == BTN_HELP)
+async def btn_help(m: Message) -> None:
+    await safe_answer(m, WELCOME)
+
+
+@dp.message(F.text == BTN_CLASSIFY)
+async def btn_classify(m: Message) -> None:
+    await safe_answer(m, "Просто пришли текст заявки следующим сообщением — ИИ определит категорию.")
+
+
+async def show_slots(m: Message) -> None:
     try:
         slots = await n8n.slots()
     except N8nError:
@@ -146,6 +191,7 @@ async def main() -> None:
         log.error("BOT_TOKEN не задан")
         return
     bot = Bot(BOT_TOKEN)
+    await bot.set_my_commands(BOT_COMMANDS)
     log.info("demo-bot up, n8n=%s", N8N_BASE_URL)
     await dp.start_polling(bot)
 
