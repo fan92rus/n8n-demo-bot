@@ -88,6 +88,8 @@ async function post(path, payload) {
   return r.json();
 }
 
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 /* ── Заявка ── */
 $('req-go').onclick = async () => {
   const text = $('req-text').value.trim();
@@ -98,8 +100,12 @@ $('req-go').onclick = async () => {
     const r = await post('/demo/classify', { text, user });
     if (r.is_request === false) {
       $('req-msg').innerHTML = '<span class="err">Похоже, это не заявка 🙂 Напишите, что нужно сделать.</span>';
+    } else if (r.needs_clarification) {
+      $('req-msg').innerHTML = '<span class="err">Уточните: ' + esc(r.clarify_question || 'что именно нужно?') + '</span>';
+    } else if (r.lead_saved === false) {
+      $('req-msg').innerHTML = '<span class="err">Не удалось сохранить заявку — попробуйте ещё раз.</span>';
     } else {
-      $('req-msg').innerHTML = `<span class="ok">✅ Заявка оформлена: ${r.category} / ${r.priority} — ${r.summary || ''}</span>`;
+      $('req-msg').innerHTML = `<span class="ok">✅ Заявка оформлена: ${esc(r.category)} / ${esc(r.priority)} — ${esc(r.summary || '')}</span>`;
       $('req-text').value = '';
       loadLeads();
     }
@@ -112,9 +118,9 @@ async function loadLeads() {
     const d = await post('/demo/leads', { user });
     const l = d.leads || [];
     $('leads').innerHTML = l.length
-      ? '<ul>' + l.map(x => `<li><b>${x.category}</b> / ${x.priority}${x.date ? ' · 📅 ' + x.date : ''} — ${x.summary || x.text}` +
-        (x.source_msg && x.source_msg !== x.summary ? `<br><span class="muted" style="white-space:pre-wrap">«${x.source_msg}»</span>` : '') +
-        ` <span class="muted">(${(x.ts || '').slice(0, 16).replace('T', ' ')})</span></li>`).join('') + '</ul>'
+      ? '<ul>' + l.map(x => `<li><b>${esc(x.category)}</b> / ${esc(x.priority)}${x.date ? ' · 📅 ' + esc(x.date) : ''} — ${esc(x.summary || x.text)}` +
+        (x.source_msg && x.source_msg !== x.summary ? `<br><span class="muted" style="white-space:pre-wrap">«${esc(x.source_msg)}»</span>` : '') +
+        ` <span class="muted">(${esc((x.ts || '').slice(0, 16).replace('T', ' '))})</span></li>`).join('') + '</ul>'
       : 'Заявок пока нет — оставьте первую выше.';
   } catch (e) { $('leads').innerHTML = '<span class="err">Сервис недоступен</span>'; }
 }
@@ -131,12 +137,12 @@ function renderServices() {
 async function loadSlots() {
   try {
     const d = await post('/demo/slots', {});
-    $('slots').innerHTML = d.slots.length
-      ? d.slots.map(s => `<div class="slot ${slot === s.id ? 'on' : ''}" data-id="${s.id}" data-label="${s.label} ${s.start.slice(-5)}">${s.label}<br><span class="muted">${s.start}</span></div>`).join('')
+    $('slots').innerHTML = (d.slots || []).length
+      ? (d.slots || []).map(s => `<div class="slot ${slot === s.id ? 'on' : ''}" data-id="${esc(s.id)}" data-label="${esc(s.label)} ${esc(s.start.slice(-5))}">${esc(s.label)}<br><span class="muted">${esc(s.start)}</span></div>`).join('')
       : '<span class="muted">Свободных слотов нет</span>';
     document.querySelectorAll('.slot').forEach(el =>
       el.onclick = () => { slot = slot === el.dataset.id ? null : el.dataset.id; loadSlots(); refreshGo(); });
-  } catch (e) { $('slots').innerHTML = '<span class="err">Сервис недоступен: ' + e.message + '</span>'; }
+  } catch (e) { $('slots').innerHTML = '<span class="err">Сервис недоступен</span>'; }
 }
 
 function refreshGo() { $('go').disabled = !(svc && slot); }
@@ -147,8 +153,8 @@ $('go').onclick = async () => {
   try {
     const r = await post('/demo/book', { slot_id: slot, user, service: svc });
     $('msg').innerHTML = r.ok
-      ? `<span class="ok">✅ Записан: ${r.booking.start}. Подтверждение — у бота.</span>`
-      : '<span class="err">' + (r.error || 'ошибка') + '</span>';
+      ? `<span class="ok">✅ Записан: ${esc(r.booking && r.booking.start)}. Подтверждение — у бота.</span>`
+      : '<span class="err">' + esc(r.error || 'ошибка') + '</span>';
     slot = null; loadSlots();
   } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
   refreshGo();
