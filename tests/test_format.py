@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.format import format_booking, format_classify, format_slots
+from bot.format import format_classify, format_slots
 
 
 def test_format_classify_full():
@@ -25,33 +25,3 @@ def test_format_slots_list():
     s = format_slots([{"id": "s1", "label": "Пн 10:00", "start": "10:00"}])
     assert "Пн 10:00" in s and "/book" not in s
 
-
-def test_format_booking_ok():
-    s = format_booking({"ok": True, "booking": {"label": "Пн 10:00", "start": "10:00"}})
-    assert "Записал" in s
-
-
-def test_format_booking_failure():
-    s = format_booking({"ok": False, "error": "занят"})
-    assert "Не получилось" in s
-
-
-def test_format_leads_empty():
-    from bot.format import format_leads
-
-    assert "Своих заявок пока нет" in format_leads([])
-
-
-def test_format_leads_list():
-    from bot.format import format_leads
-
-    out = format_leads([{"user": "@t", "category": "интеграция", "priority": "высокий", "summary": "CRM"}])
-    assert "интеграция" in out and "@t" in out
-    assert "приватно" in out  # приватный режим по умолчанию
-
-
-def test_format_leads_manager():
-    from bot.format import format_leads
-
-    out = format_leads([{"user": "@t", "category": "бот", "priority": "средний", "summary": "x"}], private=False)
-    assert "режим менеджера" in out

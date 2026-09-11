@@ -151,15 +151,3 @@ async def test_cancel_booking():
     assert r["ok"] is True
     assert "freed" in r
 
-
-@pytest.mark.asyncio
-async def test_leads():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/webhook/demo/leads"
-        import json as _json
-        assert _json.loads(request.content).get("user") == "@tester"
-        return httpx.Response(200, json={"ok": True, "leads_private": True, "leads": [{"user": "@tester", "category": "интеграция", "priority": "высокий", "summary": "CRM"}]})
-
-    r = await make_client(handler).leads(user="@tester")
-    assert r["leads"][0]["category"] == "интеграция"
-    assert r["leads_private"] is True

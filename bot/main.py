@@ -30,7 +30,7 @@ from aiogram.types import (
 )
 
 from bot.config import BOT_TOKEN, N8N_BASE_URL, N8N_TIMEOUT
-from bot.format import format_booking, format_classify, format_leads, format_slots
+from bot.format import format_booking, format_classify, format_slots
 from bot.n8n_client import N8nClient, N8nError
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -47,8 +47,7 @@ WELCOME = (
     "• /slots — свободные слоты, запись в один клик\n"
     "• /wizard — подбор услуги за 3 клика\n"
     "• /my — ваши записи и отмена\n"
-    "• /leads — ваши заявки\n"
-    "• Кнопка ниже — мини-апп: каталог, слоты, заявки"
+    "• Заявки — в мини-аппе (кнопка «🖥 Мини-апп»)"
 )
 
 # Постоянное меню-клавиатура (кнопки под полем ввода)
@@ -56,15 +55,25 @@ BTN_CLASSIFY = "🧾 Классификация"
 BTN_SLOTS = "📅 Слоты"
 BTN_WIZARD = "🪄 Подбор услуги"
 BTN_MY = "🗂 Мои записи"
-BTN_LEADS = "📋 Лиды"
 BTN_HELP = "ℹ️ Помощь"
+BTN_MINIAPP = "🖥 Мини-апп"
 
-MENU_KB = ReplyKeyboardMarkup(
-    keyboard=[
+
+def _menu_rows() -> list:
+    rows = [
         [KeyboardButton(text=BTN_CLASSIFY), KeyboardButton(text=BTN_SLOTS)],
         [KeyboardButton(text=BTN_WIZARD), KeyboardButton(text=BTN_MY)],
-        [KeyboardButton(text=BTN_LEADS), KeyboardButton(text=BTN_HELP)],
-    ],
+    ]
+    last = []
+    if WEBAPP_URL.startswith("https://"):
+        last.append(KeyboardButton(text=BTN_MINIAPP, web_app=WebAppInfo(url=WEBAPP_URL)))
+    last.append(KeyboardButton(text=BTN_HELP))
+    rows.append(last)
+    return rows
+
+
+MENU_KB = ReplyKeyboardMarkup(
+    keyboard=_menu_rows(),
     resize_keyboard=True,
     input_field_placeholder="Текст заявки можно писать прямо сюда",
 )
@@ -75,7 +84,6 @@ BOT_COMMANDS = [
     BotCommand(command="slots", description="Свободные слоты"),
     BotCommand(command="wizard", description="Подбор услуги (кнопки по шагам)"),
     BotCommand(command="my", description="Мои записи и отмена"),
-    BotCommand(command="leads", description="Ваши заявки (приватно)"),
     BotCommand(command="help", description="Помощь"),
 ]
 
@@ -164,7 +172,7 @@ async def run_classify(m: Message, text: str) -> None:
             "«нужен бот, который принимает заявки с сайта в Google-таблицу» — и я оформлю заявку."
         )
         return
-    saved = "" if result.get("lead_saved") is False else "\n\n✅ Заявка сохранена — она в /leads и в мини-аппе."
+    saved = "" if result.get("lead_saved") is False else "\n\n✅ Заявка сохранена — она в мини-аппе («Мои заявки»)."
     await wait.edit_text(format_classify(result) + saved)
 
 
@@ -301,19 +309,6 @@ async def cb_mycancel(q: CallbackQuery) -> None:
     except Exception:  # noqa: BLE001
         pass
     await q.answer()
-
-
-@dp.message(Command("leads"))
-@dp.message(F.text == BTN_LEADS)
-async def handler_leads(m: Message) -> None:
-    try:
-        data = await n8n.leads(user=display_name(m))
-    except N8nError:
-        await safe_answer(m, "Сервис недоступен, попробуйте позже.")
-        return
-    leads = data.get("leads", []) if isinstance(data, dict) else []
-    private = bool(data.get("leads_private", True)) if isinstance(data, dict) else True
-    await safe_answer(m, format_leads(leads, private=private))
 
 
 @dp.message(F.text)
