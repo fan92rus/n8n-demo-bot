@@ -38,6 +38,7 @@ log = logging.getLogger("demo-bot")
 
 dp = Dispatcher()
 n8n = N8nClient(N8N_BASE_URL, timeout=N8N_TIMEOUT)
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
 WELCOME = (
     "Привет! Я демо-бот IT-студии: заявки и запись клиентов работают через n8n.\n\n"
@@ -260,7 +261,6 @@ async def cb_book(q: CallbackQuery) -> None:
     await q.answer()
 
 
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
 
 def display_name(u) -> str:
