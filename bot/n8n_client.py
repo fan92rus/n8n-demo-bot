@@ -55,13 +55,17 @@ class N8nClient:
         """Проставить дату консультации последней открытой заявке пользователя."""
         return await self._post("/webhook/demo/lead_date", {"user": user, "date": date})
 
-    async def wizard(self, sel: str) -> dict:
+    async def wizard(self, sel: str, user: str | None = None) -> dict:
         """Один шаг wizard'а: sel='start' или состояние из callback_data (текст после 'wz:').
 
         Бот stateless — всё состояние шага передаётся в кнопках; n8n возвращает
         текст и новую раскладку кнопок (кнопки меняются по шагам).
+        user — реальный пользователь: на финале визарда бронь пишется на него.
         """
-        return await self._post("/webhook/demo/wizard", {"sel": sel})
+        payload: dict = {"sel": sel}
+        if user:
+            payload["user"] = user
+        return await self._post("/webhook/demo/wizard", payload)
 
     async def my_bookings(self, user: str) -> dict:
         """Список броней пользователя (демо-стенд хранит их в staticData)."""

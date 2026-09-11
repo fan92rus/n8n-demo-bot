@@ -169,7 +169,7 @@ def cb_bytes_fit(cb: str) -> str:
 
 async def run_wizard(m: Message, sel: str = "start") -> None:
     try:
-        step = await n8n.wizard(sel)
+        step = await n8n.wizard(sel, display_name(m.from_user))
     except N8nError:
         await safe_answer(m, "Сервис недоступен, попробуйте позже.")
         return
@@ -198,7 +198,7 @@ async def btn_wizard(m: Message) -> None:
 async def cb_wizard(q: CallbackQuery) -> None:
     sel = cb_bytes_fit((q.data or "")[3:])
     try:
-        step = await n8n.wizard(sel)
+        step = await n8n.wizard(sel, display_name(q.from_user))
         text = step.get("text", "…")
         kb = kb_from_buttons(step.get("buttons"))
     except N8nError:
@@ -236,6 +236,10 @@ async def run_classify(m: Message, text: str) -> None:
                 pending_put(m.chat.id, pending)  # сбой сервиса — уточнение не теряем
             log.warning("classify failed: %s", e)
             await wait.edit_text("Сервис классификации недоступен, попробуйте позже.")
+            return
+        if result.get("ok") is False:
+            # контролируемый отказ n8n (напр., пустой текст из мини-аппа)
+            await wait.edit_text(str(result.get("error") or "Не получилось, попробуйте ещё раз."))
             return
         if result.get("is_request") is False:
             await wait.edit_text(

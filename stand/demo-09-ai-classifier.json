@@ -23,7 +23,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body || {};\nconst text = String(body.text || '').slice(0, 2000);\nif (!text.trim()) { throw new Error('text is required'); }\nreturn [{ json: { text, user: String(body.user || 'аноним') } }];"
+        "jsCode": "const body = $input.first().json.body || {};\nconst text = String(body.text || '').slice(0, 2000);\nif (!text.trim()) {\n  // пустой текст — честный ответ вместо HTTP 500\n  return [{ json: { ok: false, error: 'Опишите задачу — отправьте текст заявки' } }];\n}\nreturn [{ json: { text, user: String(body.user || 'аноним').slice(0, 64) } }];"
       },
       "id": "code-1",
       "name": "Валидация",
@@ -52,7 +52,9 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: 'deepseek-flash', temperature: 0.1, messages: [ { role: 'system', content: 'Ты — маршрутизатор заявок в IT-студии. Ответь СТРОГО одним JSON: {\"category\": одно из [\"разработка\",\"интеграция\",\"бот\",\"данные\",\"прочее\"], \"priority\": одно из [\"низкий\",\"средний\",\"высокий\"], \"summary\": \"краткое резюме до 100 символов\", \"is_request\": true только если это заявка на работу или услугу, false если вопрос или болтовня, \"needs_clarification\": true если это похоже на заявку, но непонятно ЧТО конкретно нужно сделать (нет предмета работы/задачи), иначе false, \"clarify_question\": \"один короткий уточняющий вопрос по существу (обязателен при needs_clarification=true, иначе пустая строка)\"}. Никакого текста кроме JSON.' }, { role: 'user', content: $json.text } ] }) }}",
-        "options": {}
+        "options": {
+          "timeout": 30000
+        }
       },
       "id": "http-1",
       "name": "LLM",
@@ -71,7 +73,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nlet parsed;\ntry { parsed = JSON.parse(r.choices[0].message.content); } catch (e) { parsed = { category: 'прочее', priority: 'средний', summary: 'не удалось разобрать ответ модели', is_request: true, needs_clarification: false, clarify_question: '' }; }\nparsed.needs_clarification = parsed.needs_clarification === true;\nparsed.clarify_question = String(parsed.clarify_question || '');\nreturn [{ json: { ok: true, ...parsed } }];"
+        "jsCode": "const r = $input.first().json;\nlet content = '';\ntry { content = String(r.choices[0].message.content || ''); } catch (e) {}\n// LLM любит заворачивать JSON в ```-фенсы — срезаем\ncontent = content.replace(/^```(?:json)?\\s*/i, '').replace(/```\\s*$/, '').trim();\nlet parsed = null;\ntry { parsed = JSON.parse(content); } catch (e) {}\nif (!parsed || typeof parsed !== 'object') {\n  // не ломаемся в мусорный лид: безопасный «не заявка» с подсказкой\n  return [{ json: { ok: true, category: 'прочее', priority: 'средний',\n    summary: 'не удалось разобрать ответ модели — попробуйте переформулировать',\n    is_request: false, needs_clarification: false, clarify_question: '', lead_saved: false } }];\n}\nparsed.is_request = parsed.is_request === true || parsed.is_request === 'true';\nparsed.needs_clarification = parsed.needs_clarification === true || parsed.needs_clarification === 'true';\nparsed.clarify_question = String(parsed.clarify_question || '');\nreturn [{ json: { ok: true, ...parsed } }];"
       },
       "id": "code-2",
       "name": "Разбор ответа",
@@ -248,6 +250,37 @@
         1740,
         620
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.ok === false) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        340,
+        0
+      ],
+      "id": "if-empty-09",
+      "name": "Пусто?"
     }
   ],
   "connections": {
@@ -266,7 +299,7 @@
       "main": [
         [
           {
-            "node": "LLM",
+            "node": "Пусто?",
             "type": "main",
             "index": 0
           }
@@ -355,6 +388,24 @@
         [
           {
             "node": "Ответ lead_date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Пусто?": {
+      "main": [
+        [
+          {
+            "node": "Ответ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM",
             "type": "main",
             "index": 0
           }
