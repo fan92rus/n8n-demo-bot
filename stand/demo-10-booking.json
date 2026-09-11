@@ -1,0 +1,78 @@
+{
+  "id": "demo-10",
+  "name": "Демо-стенд: слоты и запись (демо-бот)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/slots",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-slots",
+      "name": "Webhook slots",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "demo-slots"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/book",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-book",
+      "name": "Webhook book",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 220],
+      "webhookId": "demo-book"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Генерируем слоты на 3 рабочих дня вперёд (10:00 и 14:00), вычитаем занятые.\nconst staticData = $getWorkflowStaticData('global');\nstaticData.bookings = staticData.bookings || {};\nconst booked = staticData.bookings;\nconst slots = [];\nconst now = new Date();\nlet d = new Date(now);\nwhile (slots.length < 6) {\n  d.setDate(d.getDate() + 1);\n  const dow = d.getDay();\n  if (dow === 0 || dow === 6) continue;\n  const day = d.toISOString().slice(0, 10);\n  for (const [h, label] of [['10:00', 'утро'], ['14:00', 'день']]) {\n    const id = day + '-' + h.replace(':', '');\n    if (booked[id]) continue;\n    slots.push({ id, label, start: day + ' ' + h + ' (' + label + ')', tz: 'Asia/Barnaul' });\n  }\n}\nreturn [{ json: { ok: true, slots } }];"
+      },
+      "id": "code-slots",
+      "name": "Слоты",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}", "options": {} },
+      "id": "resp-slots",
+      "name": "Ответ slots",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Бронь слота: если свободен - помечаем в staticData (переживает execution'ы в production).\nconst staticData = $getWorkflowStaticData('global');\nstaticData.bookings = staticData.bookings || {};\nconst body = $input.first().json.body || {};\nconst slotId = String(body.slot_id || '');\nconst user = String(body.user || 'unknown');\nif (!/^\\d{4}-\\d{2}-\\d{2}-\\d{4}$/.test(slotId)) {\n  return [{ json: { ok: false, error: 'неверный формат slot_id' } }];\n}\nif (staticData.bookings[slotId]) {\n  return [{ json: { ok: false, error: 'слот уже занят' } }];\n}\nstaticData.bookings[slotId] = { user, at: new Date().toISOString() };\nconst day = slotId.slice(0, 10);\nconst hh = slotId.slice(11, 13) + ':' + slotId.slice(13, 15);\nreturn [{ json: { ok: true, booking: { slot_id: slotId, label: day, start: day + ' ' + hh, user } } }];"
+      },
+      "id": "code-book",
+      "name": "Бронь",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 220]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}", "options": {} },
+      "id": "resp-book",
+      "name": "Ответ book",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 220]
+    }
+  ],
+  "connections": {
+    "Webhook slots": { "main": [[{ "node": "Слоты", "type": "main", "index": 0 }]] },
+    "Слоты": { "main": [[{ "node": "Ответ slots", "type": "main", "index": 0 }]] },
+    "Webhook book": { "main": [[{ "node": "Бронь", "type": "main", "index": 0 }]] },
+    "Бронь": { "main": [[{ "node": "Ответ book", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "meta": { "instanceId": "live-stand-ct100" }
+}

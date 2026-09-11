@@ -22,6 +22,17 @@ pip install -r requirements.txt
 BOT_TOKEN=... N8N_BASE_URL=http://192.168.1.111:5678 python -m bot.main
 ```
 
+## Деплой (CT100)
+
+```bash
+docker build -t n8n-demo-bot:latest .
+docker run -d --name n8n-demo-bot --restart unless-stopped \
+  --env-file /root/n8n-demo-bot.env \
+  -e N8N_BASE_URL=http://192.168.1.111:5678 n8n-demo-bot:latest
+```
+
+`/root/n8n-demo-bot.env`: `BOT_TOKEN=...` (секрет, вне git).
+
 ## CI
 
 Gitea Actions: ruff + pytest на каждый push в main/dev (`.gitea/workflows/build.yml`).
