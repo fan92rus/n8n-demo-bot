@@ -13,10 +13,11 @@ jobs:
       options: --add-host gitea.local:192.168.1.96
     steps:
       - name: Checkout
-        run: |
-          apt-get update -qq && apt-get install -y -qq git >/dev/null
-          git config --global http.https://gitea.local.sslverify false
-          git clone --depth=1 --branch=${{ github.ref_name }} "https://gitea:${{ github.token }}@gitea.local/fan92rus/n8n-demo-bot.git" .
+        uses: actions/checkout@v4
+        env:
+          GIT_SSL_NO_VERIFY: "true"
+        with:
+          fetch-depth: 1
       - name: Install deps
         run: pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
       - name: Lint (ruff)

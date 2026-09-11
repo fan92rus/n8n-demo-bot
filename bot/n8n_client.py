@@ -13,6 +13,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 import httpx
 
 
@@ -26,10 +29,17 @@ class N8nClient:
         base_url: str,
         timeout: float = 90.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        sign_secret: str = "",
     ) -> None:
         self._base = base_url.rstrip("/")
         self._timeout = timeout
         self._transport = transport
+        self._sign_secret = sign_secret
+
+    @staticmethod
+    def sign_user(secret: str, user: str) -> str:
+        """HMAC-SHA256(user) — воркфлоу n8n доверяет user только с этой подписью."""
+        return hmac.new(secret.encode(), str(user).encode(), hashlib.sha256).hexdigest()
 
     async def classify(self, text: str, user: str | None = None) -> dict:
         payload: dict = {"text": text}
@@ -76,6 +86,9 @@ class N8nClient:
         return await self._post("/webhook/demo/cancel", {"slot_id": slot_id, "user": user})
 
     async def _post(self, path: str, payload: dict) -> dict:
+        if self._sign_secret and payload.get("user"):
+            payload = dict(payload)
+            payload["sig"] = self.sign_user(self._sign_secret, payload["user"])
         try:
             async with httpx.AsyncClient(
                 timeout=self._timeout, transport=self._transport

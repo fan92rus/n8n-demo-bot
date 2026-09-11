@@ -4,17 +4,25 @@
 # Требует живого стенда (CT100). Кодирует воронку: слоты -> бронь -> мои ->
 # отмена -> заявка (ясная/туманная/болтовня) -> дата -> лиды.
 # Выход: 0 = все проверки прошли, 1 = есть провалы (для CI).
+import hashlib
+import hmac
 import json
+import os
 import sys
 import urllib.request
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "https://funnyhome.netcraze.pro"
 USER = "@e2e_test_agent"
 OTHER = "@e2e_other"
+SECRET = os.environ.get("DEMO_SIGN_SECRET", "")
+assert SECRET, "нужен env DEMO_SIGN_SECRET (identity обязательна на стенде)"
 passed, failed = [], []
 
 
-def post(path: str, payload: dict) -> dict:
+def post(path: str, payload: dict, sign: bool = True) -> dict:
+    if sign and SECRET and payload.get("user"):
+        payload = dict(payload)
+        payload["sig"] = hmac.new(SECRET.encode(), str(payload["user"]).encode(), hashlib.sha256).hexdigest()
     req = urllib.request.Request(
         BASE + "/webhook" + path,
         data=json.dumps(payload).encode(),
@@ -38,6 +46,8 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 print("== 1. Слоты и бронирование ==")
 slots = post("/demo/slots", {})
+noforgery = post("/demo/book", {"slot_id": slots["slots"][0]["id"], "user": USER}, sign=False)
+check("identity: подделка без подписи отклонена", noforgery.get("ok") is False and "unauth" in str(noforgery.get("error", "")), str(noforgery))
 check("slots: ok + список", slots.get("ok") is True and isinstance(slots.get("slots"), list) and len(slots["slots"]) > 0)
 slot = slots["slots"][0]["id"]
 book = post("/demo/book", {"slot_id": slot, "user": USER})

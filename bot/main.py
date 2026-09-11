@@ -30,7 +30,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from bot.config import BOT_TOKEN, N8N_BASE_URL, N8N_TIMEOUT
+from bot.config import BOT_TOKEN, DEMO_SIGN_SECRET, N8N_BASE_URL, N8N_TIMEOUT
 from bot.format import format_booking, format_classify, format_slots
 from bot.n8n_client import N8nClient, N8nError
 
@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 log = logging.getLogger("demo-bot")
 
 dp = Dispatcher()
-n8n = N8nClient(N8N_BASE_URL, timeout=N8N_TIMEOUT)
+n8n = N8nClient(N8N_BASE_URL, timeout=N8N_TIMEOUT, sign_secret=DEMO_SIGN_SECRET)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
 # Незавершённые уточнения заявок: chat_id -> (текст, ts). В памяти процесса
@@ -440,6 +440,9 @@ async def free_text(m: Message) -> None:
 async def main() -> None:
     if not BOT_TOKEN:
         log.error("BOT_TOKEN не задан")
+        sys.exit(1)
+    if not DEMO_SIGN_SECRET:
+        log.error("DEMO_SIGN_SECRET не задан")
         sys.exit(1)
     bot = Bot(BOT_TOKEN)
     await bot.set_my_commands(BOT_COMMANDS)

@@ -70,10 +70,12 @@ const SERVICES = [
   { id: 'dev',        name: 'Разработка',        desc: 'Бот, мини-апп, бэкенд' },
 ];
 let svc = null, slot = null, user = 'гость';
+let initData = ''; // подписанная Telegram строка — единственный доверенный identity
 
 try {
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand();
+    initData = tg.initData || '';
     const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
     if (u) user = u.username ? '@' + u.username : String(u.id);
   }
@@ -97,7 +99,7 @@ $('req-go').onclick = async () => {
   $('req-go').disabled = true;
   $('req-msg').innerHTML = 'Отправляю…';
   try {
-    const r = await post('/demo/classify', { text, user });
+    const r = await post('/demo/classify', { text, init_data: initData });
     if (r.is_request === false) {
       $('req-msg').innerHTML = '<span class="err">Похоже, это не заявка 🙂 Напишите, что нужно сделать.</span>';
     } else if (r.needs_clarification) {
@@ -115,7 +117,7 @@ $('req-go').onclick = async () => {
 
 async function loadLeads() {
   try {
-    const d = await post('/demo/leads', { user });
+    const d = await post('/demo/leads', { init_data: initData });
     const l = d.leads || [];
     $('leads').innerHTML = l.length
       ? '<ul>' + l.map(x => `<li><b>${esc(x.category)}</b> / ${esc(x.priority)}${x.date ? ' · 📅 ' + esc(x.date) : ''} — ${esc(x.summary || x.text)}` +
@@ -151,7 +153,7 @@ $('go').onclick = async () => {
   $('go').disabled = true;
   $('msg').innerHTML = 'Записываю…';
   try {
-    const r = await post('/demo/book', { slot_id: slot, user, service: svc });
+    const r = await post('/demo/book', { slot_id: slot, init_data: initData, service: svc });
     $('msg').innerHTML = r.ok
       ? `<span class="ok">✅ Записан: ${esc(r.booking && r.booking.start)}. Подтверждение — у бота.</span>`
       : '<span class="err">' + esc(r.error || 'ошибка') + '</span>';
