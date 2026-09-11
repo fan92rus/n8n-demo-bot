@@ -41,3 +41,9 @@ Gitea Actions: ruff + pytest на каждый push в main/dev (`.gitea/workflo
 
 Клиент n8n и форматтеры покрыты unit-тестами на httpx.MockTransport — сеть и
 aiogram не нужны: `pytest -q`.
+
+## Мини-апп (Telegram WebApp)
+
+Страница: https://funnyhome.netcraze.pro/ — CT100: nginx (8091) → Traefik (Let's Encrypt, домен оператора).
+Бэкенд из страницы — те же n8n-вебхуки `/webhook/demo/*`: каталог услуг → слоты → запись → отмена.
+Кнопка «🖥 Открыть мини-апп» появляется в /start при заданном `WEBAPP_URL` (только https).
