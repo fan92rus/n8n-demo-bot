@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IT-студия — запись</title>
+<title>IT-студия — запись и заявки</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root { color-scheme: dark; }
@@ -24,6 +24,9 @@
   button { width: 100%; padding: 12px; margin-top: 12px; border: 0; border-radius: 10px; font-size: 15px;
            background: var(--tg-theme-button-color, #2ea6ff); color: var(--tg-theme-button-text-color, #fff); cursor: pointer; }
   button:disabled { opacity: .5; }
+  textarea { width: 100%; min-height: 64px; resize: vertical; border-radius: 10px; border: 1px solid #2f3b4a;
+             background: var(--tg-theme-bg-color, #17212b); color: inherit; padding: 10px; font: inherit; }
+  .card button { margin-top: 8px; }
   .muted { opacity: .55; font-size: 13px; }
   .ok { color: #4caf50; } .err { color: #ef5350; }
   ul { margin: 6px 0 0; padding-left: 18px; }
@@ -32,7 +35,20 @@
 </head>
 <body>
   <h1>🖥 Демо-мини-апп</h1>
-  <div class="sub">Каталог → слот → запись. Бэкенд: n8n-воркфлоу (demo-10), всё живьём.</div>
+  <div class="sub">Каталог → слот → запись, и ваши заявки. Бэкенд: n8n-воркфлоу, всё живьём.</div>
+
+  <div class="card">
+    <b>✉️ Оставить заявку</b>
+    <div class="muted" style="margin:4px 0 8px">Напишите, что нужно сделать, — ИИ определит категорию и сохранит заявку (видна только вам).</div>
+    <textarea id="req-text" placeholder="Например: нужен бот, который принимает заявки с сайта в Google-таблицу"></textarea>
+    <button id="req-go">Отправить заявку</button>
+    <div id="req-msg" class="muted" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <b>📋 Мои заявки</b>
+    <div id="leads" class="muted" style="margin-top:6px">…</div>
+  </div>
 
   <div class="card">
     <div id="svc-list">Загрузка услуг…</div>
@@ -64,7 +80,7 @@ try {
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand();
     const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
-    if (u) user = u.username ? '@' + u.username : (u.first_name || 'гость');
+    if (u) user = u.username ? '@' + u.username : String(u.id);
   }
 } catch (e) {}
 
@@ -77,6 +93,36 @@ async function post(path, payload) {
   return r.json();
 }
 
+/* ── Заявка ── */
+$('req-go').onclick = async () => {
+  const text = $('req-text').value.trim();
+  if (!text) { $('req-msg').innerHTML = '<span class="err">Опишите задачу</span>'; return; }
+  $('req-go').disabled = true;
+  $('req-msg').innerHTML = 'Отправляю…';
+  try {
+    const r = await post('/demo/classify', { text, user });
+    if (r.is_request === false) {
+      $('req-msg').innerHTML = '<span class="err">Похоже, это не заявка 🙂 Напишите, что нужно сделать.</span>';
+    } else {
+      $('req-msg').innerHTML = `<span class="ok">✅ Заявка оформлена: ${r.category} / ${r.priority} — ${r.summary || ''}</span>`;
+      $('req-text').value = '';
+      loadLeads();
+    }
+  } catch (e) { $('req-msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
+  $('req-go').disabled = false;
+};
+
+async function loadLeads() {
+  try {
+    const d = await post('/demo/leads', { user });
+    const l = d.leads || [];
+    $('leads').innerHTML = l.length
+      ? '<ul>' + l.map(x => `<li><b>${x.category}</b> / ${x.priority} — ${x.summary || x.text} <span class="muted">(${(x.ts || '').slice(0, 16).replace('T', ' ')})</span></li>`).join('') + '</ul>'
+      : 'Заявок пока нет — оставьте первую выше.';
+  } catch (e) { $('leads').innerHTML = '<span class="err">Сервис недоступен</span>'; }
+}
+
+/* ── Слоты и записи ── */
 function renderServices() {
   $('svc-list').innerHTML = SERVICES.map(s =>
     `<div class="svc ${svc === s.id ? 'on' : ''}" data-id="${s.id}"><div><b>${s.name}</b><span>${s.desc}</span></div></div>`
@@ -128,7 +174,7 @@ $('go').onclick = async () => {
   refreshGo();
 };
 
-renderServices(); loadSlots(); loadMy(); refreshGo();
+renderServices(); loadSlots(); loadMy(); loadLeads(); refreshGo();
 </script>
 </body>
 </html>

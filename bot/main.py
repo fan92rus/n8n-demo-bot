@@ -6,7 +6,7 @@
   /classify <текст> или просто текст — ИИ-классификатор заявки
   /wizard — подбор услуги: кнопки меняются по шагам (n8n возвращает новую раскладку)
   /slots — свободные слоты (inline-кнопки)
-  /book <id> — запись на слот
+  текст без команды — заявка: ИИ определит, заявка ли это, и сохранит
 """
 
 from __future__ import annotations
@@ -40,14 +40,15 @@ dp = Dispatcher()
 n8n = N8nClient(N8N_BASE_URL, timeout=N8N_TIMEOUT)
 
 WELCOME = (
-    "Привет! Я демо-бот IT-студии: покажу, как заявки и запись клиентов "
-    "работают через n8n.\n\n"
-    "• Кинь текст заявки (или /classify <текст>) — ИИ определит категорию\n"
-    "• /wizard — подбор услуги за 3 клика (кнопки меняются по шагам)\n"
-    "• /slots — свободные слоты для записи\n"
-    "• /my — твои записи и отмена\n"
-    "• /leads — ваши заявки (видны только вам)\n"
-    "• /book <id> — записаться"
+    "Привет! Я демо-бот IT-студии: заявки и запись клиентов работают через n8n.\n\n"
+    "• Напишите текстом, что нужно сделать, — это станет вашей заявкой\n"
+    "   (ИИ определит категорию и сохранит её, видно будет только вам)\n"
+    "• Если это не заявка — подскажу, что написать\n"
+    "• /slots — свободные слоты, запись в один клик\n"
+    "• /wizard — подбор услуги за 3 клика\n"
+    "• /my — ваши записи и отмена\n"
+    "• /leads — ваши заявки\n"
+    "• Кнопка ниже — мини-апп: каталог, слоты, заявки"
 )
 
 # Постоянное меню-клавиатура (кнопки под полем ввода)
@@ -72,7 +73,6 @@ BOT_COMMANDS = [
     BotCommand(command="start", description="Меню"),
     BotCommand(command="classify", description="Классификация заявки"),
     BotCommand(command="slots", description="Свободные слоты"),
-    BotCommand(command="book", description="Запись: /book <id>"),
     BotCommand(command="wizard", description="Подбор услуги (кнопки по шагам)"),
     BotCommand(command="my", description="Мои записи и отмена"),
     BotCommand(command="leads", description="Ваши заявки (приватно)"),
@@ -154,10 +154,18 @@ async def run_classify(m: Message, text: str) -> None:
     wait = await m.answer("Думаю…")
     try:
         result = await n8n.classify(text[:2000], user)
-        await wait.edit_text(format_classify(result))
     except N8nError as e:
         log.warning("classify failed: %s", e)
         await wait.edit_text("Сервис классификации недоступен, попробуйте позже.")
+        return
+    if result.get("is_request") is False:
+        await wait.edit_text(
+            "Похоже, это не заявка 🙂 Напишите, что нужно сделать, — например: "
+            "«нужен бот, который принимает заявки с сайта в Google-таблицу» — и я оформлю заявку."
+        )
+        return
+    saved = "" if result.get("lead_saved") is False else "\n\n✅ Заявка сохранена — она в /leads и в мини-аппе."
+    await wait.edit_text(format_classify(result) + saved)
 
 
 @dp.message(Command("classify"))
@@ -227,15 +235,6 @@ async def run_book(m: Message, slot_id: str) -> None:
         await safe_answer(m, format_booking(result))
     except N8nError:
         await safe_answer(m, "Запись недоступна, попробуйте позже.")
-
-
-@dp.message(Command("book"))
-async def cmd_book(m: Message, command: CommandObject) -> None:
-    slot_id = (command.args or "").strip()
-    if not slot_id:
-        await safe_answer(m, "Укажи слот: /book <id> (список — /slots)")
-        return
-    await run_book(m, slot_id)
 
 
 @dp.callback_query(F.data.startswith("book:"))

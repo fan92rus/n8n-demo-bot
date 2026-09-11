@@ -23,7 +23,7 @@ def test_format_slots_empty():
 
 def test_format_slots_list():
     s = format_slots([{"id": "s1", "label": "Пн 10:00", "start": "10:00"}])
-    assert "Пн 10:00" in s and "/book" in s
+    assert "Пн 10:00" in s and "/book" not in s
 
 
 def test_format_booking_ok():

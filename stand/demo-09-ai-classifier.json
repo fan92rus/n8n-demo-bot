@@ -51,7 +51,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'deepseek-flash', temperature: 0.1, messages: [ { role: 'system', content: 'Ты — маршрутизатор заявок в IT-студии. Ответь СТРОГО одним JSON: {\"category\": одно из [\"разработка\",\"интеграция\",\"бот\",\"данные\",\"прочее\"], \"priority\": одно из [\"низкий\",\"средний\",\"высокий\"], \"summary\": \"краткое резюме до 100 символов\"}. Никакого текста кроме JSON.' }, { role: 'user', content: $json.text } ] }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: 'deepseek-flash', temperature: 0.1, messages: [ { role: 'system', content: 'Ты — маршрутизатор заявок в IT-студии. Ответь СТРОГО одним JSON: {\"category\": одно из [\"разработка\",\"интеграция\",\"бот\",\"данные\",\"прочее\"], \"priority\": одно из [\"низкий\",\"средний\",\"высокий\"], \"summary\": \"краткое резюме до 100 символов\", \"is_request\": true только если это заявка на работу или услугу, false если вопрос или болтовня}. Никакого текста кроме JSON.' }, { role: 'user', content: $json.text } ] }) }}",
         "options": {}
       },
       "id": "http-1",
@@ -71,7 +71,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nlet parsed;\ntry { parsed = JSON.parse(r.choices[0].message.content); } catch (e) { parsed = { category: 'прочее', priority: 'средний', summary: 'не удалось разобрать ответ модели' }; }\nreturn [{ json: { ok: true, ...parsed } }];"
+        "jsCode": "const r = $input.first().json;\nlet parsed;\ntry { parsed = JSON.parse(r.choices[0].message.content); } catch (e) { parsed = { category: 'прочее', priority: 'средний', summary: 'не удалось разобрать ответ модели', is_request: true }; }\nreturn [{ json: { ok: true, ...parsed } }];"
       },
       "id": "code-2",
       "name": "Разбор ответа",
@@ -99,7 +99,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Лид-захват: каждая классифицированная заявка попадает в очередь менеджера\nconst staticData = $getWorkflowStaticData('global');\nstaticData.leads = staticData.leads || [];\nconst src = $('Валидация').first().json;\nstaticData.leads.push({\n  user: src.user, text: String(src.text || '').slice(0, 200),\n  category: $json.category, priority: $json.priority, summary: $json.summary,\n  ts: new Date().toISOString(),\n});\nif (staticData.leads.length > 200) { staticData.leads.splice(0, staticData.leads.length - 200); }\nreturn [{ json: $json }];"
+        "jsCode": "// Лид-захват: каждая классифицированная заявка попадает в очередь менеджера\nconst staticData = $getWorkflowStaticData('global');\nstaticData.leads = staticData.leads || [];\nif ($json.is_request === false) { return [{ json: { ...$json, lead_saved: false } }]; }\nconst src = $('Валидация').first().json;\nstaticData.leads.push({\n  user: src.user, text: String(src.text || '').slice(0, 200),\n  category: $json.category, priority: $json.priority, summary: $json.summary,\n  ts: new Date().toISOString(),\n});\nif (staticData.leads.length > 200) { staticData.leads.splice(0, staticData.leads.length - 200); }\nreturn [{ json: { ...$json, lead_saved: true } }];"
       },
       "id": "code-lead",
       "name": "Лид-захват",

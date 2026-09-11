@@ -20,7 +20,7 @@ def format_slots(slots: list[dict]) -> str:
     for s in slots:
         lines.append(f"• {s.get('label', s.get('id', '?'))} — {s.get('start', '')}")
     lines.append("")
-    lines.append("Записаться: /book <id слота>")
+    lines.append("Нажмите на слот ниже, чтобы записаться")
     return "\n".join(lines)
 
 
