@@ -1,0 +1,25 @@
+name: build
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+      options: --add-host gitea.local:192.168.1.96
+    steps:
+      - name: Checkout
+        run: |
+          apt-get update -qq && apt-get install -y -qq git >/dev/null
+          git config --global http.https://gitea.local.sslverify false
+          git clone --depth=1 --branch=${{ github.ref_name }} "https://gitea:${{ github.token }}@gitea.local/fan92rus/n8n-demo-bot.git" .
+      - name: Install deps
+        run: pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check bot/ tests/
+      - name: Tests
+        run: pytest -q
