@@ -28,7 +28,7 @@ from aiogram.types import (
 )
 
 from bot.config import BOT_TOKEN, N8N_BASE_URL, N8N_TIMEOUT
-from bot.format import format_booking, format_classify, format_slots
+from bot.format import format_booking, format_classify, format_leads, format_slots
 from bot.n8n_client import N8nClient, N8nError
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -43,6 +43,8 @@ WELCOME = (
     "• Кинь текст заявки (или /classify <текст>) — ИИ определит категорию\n"
     "• /wizard — подбор услуги за 3 клика (кнопки меняются по шагам)\n"
     "• /slots — свободные слоты для записи\n"
+    "• /my — твои записи и отмена\n"
+    "• /leads — очередь заявок (вид менеджера)\n"
     "• /book <id> — записаться"
 )
 
@@ -50,12 +52,15 @@ WELCOME = (
 BTN_CLASSIFY = "🧾 Классификация"
 BTN_SLOTS = "📅 Слоты"
 BTN_WIZARD = "🪄 Подбор услуги"
+BTN_MY = "🗂 Мои записи"
+BTN_LEADS = "📋 Лиды"
 BTN_HELP = "ℹ️ Помощь"
 
 MENU_KB = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=BTN_CLASSIFY), KeyboardButton(text=BTN_SLOTS)],
-        [KeyboardButton(text=BTN_WIZARD), KeyboardButton(text=BTN_HELP)],
+        [KeyboardButton(text=BTN_WIZARD), KeyboardButton(text=BTN_MY)],
+        [KeyboardButton(text=BTN_LEADS), KeyboardButton(text=BTN_HELP)],
     ],
     resize_keyboard=True,
     input_field_placeholder="Текст заявки можно писать прямо сюда",
@@ -67,6 +72,8 @@ BOT_COMMANDS = [
     BotCommand(command="slots", description="Свободные слоты"),
     BotCommand(command="book", description="Запись: /book <id>"),
     BotCommand(command="wizard", description="Подбор услуги (кнопки по шагам)"),
+    BotCommand(command="my", description="Мои записи и отмена"),
+    BotCommand(command="leads", description="Очередь заявок (менеджер)"),
     BotCommand(command="help", description="Помощь"),
 ]
 
@@ -138,9 +145,10 @@ async def cmd_help(m: Message) -> None:
 
 
 async def run_classify(m: Message, text: str) -> None:
+    user = display_name(m.from_user)
     wait = await m.answer("Думаю…")
     try:
-        result = await n8n.classify(text[:2000])
+        result = await n8n.classify(text[:2000], user)
         await wait.edit_text(format_classify(result))
     except N8nError as e:
         log.warning("classify failed: %s", e)
@@ -229,6 +237,66 @@ async def cb_book(q: CallbackQuery) -> None:
         text = "Запись недоступна, попробуйте позже."
     await q.message.edit_text(text)  # type: ignore[union-attr]
     await q.answer()
+
+
+def display_name(u) -> str:
+    """Кого показывать в записях и лидах: @username или id."""
+    return f"@{u.username}" if u and u.username else str(getattr(u, "id", "?"))
+
+
+@dp.message(Command("my"))
+@dp.message(F.text == BTN_MY)
+async def handler_my(m: Message) -> None:
+    user = display_name(m.from_user)
+    try:
+        data = await n8n.my_bookings(user)
+    except N8nError:
+        await safe_answer(m, "Расписание недоступно, попробуйте позже.")
+        return
+    bookings = data.get("bookings", []) if isinstance(data, dict) else []
+    if not bookings:
+        await safe_answer(m, "Записей нет. /slots — выбрать слот, /wizard — подобрать услугу.")
+        return
+    rows = [
+        [InlineKeyboardButton(text=f"❌ {b.get('start', b.get('slot_id', '?'))}", callback_data=f"mycancel:{b.get('slot_id')}")]
+        for b in bookings
+    ]
+    await m.answer(
+        "Твои записи — нажми, чтобы отменить (слот освободится):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@dp.callback_query(F.data.startswith("mycancel:"))
+async def cb_mycancel(q: CallbackQuery) -> None:
+    slot_id = (q.data or "").split(":", 1)[1]
+    user = display_name(q.from_user)
+    try:
+        result = await n8n.cancel_booking(slot_id, user)
+        text = (
+            f"✅ Отменено: {result.get('freed', slot_id)}. Слот снова свободен."
+            if result.get("ok")
+            else f"⚠️ {result.get('error', 'не удалось отменить')}"
+        )
+    except N8nError:
+        text = "Сервис недоступен, попробуйте позже."
+    try:
+        await q.message.edit_text(text)  # type: ignore[union-attr]
+    except Exception:  # noqa: BLE001
+        pass
+    await q.answer()
+
+
+@dp.message(Command("leads"))
+@dp.message(F.text == BTN_LEADS)
+async def handler_leads(m: Message) -> None:
+    try:
+        data = await n8n.leads()
+    except N8nError:
+        await safe_answer(m, "Сервис недоступен, попробуйте позже.")
+        return
+    leads = data.get("leads", []) if isinstance(data, dict) else []
+    await safe_answer(m, format_leads(leads))
 
 
 @dp.message(F.text)

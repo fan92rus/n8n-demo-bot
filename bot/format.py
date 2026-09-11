@@ -32,3 +32,18 @@ def format_booking(booking: dict) -> str:
         f"Записал: {slot.get('label', slot.get('slot_id', '?'))} — "
         f"{slot.get('start', '')}. Ждём вас!"
     )
+
+
+def format_leads(leads: list[dict]) -> str:
+    """Очередь заявок (лидов) для менеджера."""
+    if not leads:
+        return "Лидов пока нет. Пришли боту текст заявки — попадёт в эту очередь."
+    lines = ["📋 Очередь заявок:"]
+    for lead in leads[:15]:
+        lines.append(
+            f"• {lead.get('category', '?')} / {lead.get('priority', '?')} — "
+            f"{(lead.get('summary') or '')[:60]} ({lead.get('user', '?')})"
+        )
+    if len(leads) > 15:
+        lines.append(f"…и ещё {len(leads) - 15}")
+    return "\n".join(lines)

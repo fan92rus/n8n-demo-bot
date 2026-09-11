@@ -13,7 +13,10 @@
       "name": "Webhook slots",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "webhookId": "demo-slots"
     },
     {
@@ -27,7 +30,10 @@
       "name": "Webhook book",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 220],
+      "position": [
+        0,
+        220
+      ],
       "webhookId": "demo-book"
     },
     {
@@ -38,15 +44,25 @@
       "name": "Слоты",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 0]
+      "position": [
+        220,
+        0
+      ]
     },
     {
-      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}", "options": {} },
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
       "id": "resp-slots",
       "name": "Ответ slots",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {
@@ -56,23 +72,211 @@
       "name": "Бронь",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 220]
+      "position": [
+        220,
+        220
+      ]
     },
     {
-      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}", "options": {} },
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
       "id": "resp-book",
       "name": "Ответ book",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [440, 220]
+      "position": [
+        440,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/my",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "demo-my",
+      "name": "Webhook my",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "webhookId": "demo-my"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Мои записи: брони пользователя\nconst staticData = $getWorkflowStaticData('global');\nstaticData.bookings = staticData.bookings || {};\nconst body = $input.first().json.body || {};\nconst user = String(body.user || '');\nconst bookings = Object.entries(staticData.bookings)\n  .filter(([, b]) => b.user === user)\n  .map(([slotId, b]) => {\n    const day = slotId.slice(0, 10);\n    const hh = slotId.slice(11, 13) + ':' + slotId.slice(13, 15);\n    return { slot_id: slotId, start: day + ' ' + hh, user: b.user, at: b.at };\n  });\nreturn [{ json: { ok: true, bookings } }];"
+      },
+      "id": "code-my",
+      "name": "Мои записи",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "resp-my",
+      "name": "Ответ my",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/cancel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "demo-cancel",
+      "name": "Webhook cancel",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        220
+      ],
+      "webhookId": "demo-cancel"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Отмена брони: только своя; слот освобождается и возвращается в /slots\nconst staticData = $getWorkflowStaticData('global');\nstaticData.bookings = staticData.bookings || {};\nconst body = $input.first().json.body || {};\nconst slotId = String(body.slot_id || '');\nconst user = String(body.user || '');\nconst b = staticData.bookings[slotId];\nif (!b) { return [{ json: { ok: false, error: 'такой брони нет' } }]; }\nif (b.user !== user) { return [{ json: { ok: false, error: 'это не ваша бронь' } }]; }\nconst day = slotId.slice(0, 10);\nconst hh = slotId.slice(11, 13) + ':' + slotId.slice(13, 15);\ndelete staticData.bookings[slotId];\nreturn [{ json: { ok: true, freed: day + ' ' + hh, slot_id: slotId } }];"
+      },
+      "id": "code-cancel",
+      "name": "Отмена",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "resp-cancel",
+      "name": "Ответ cancel",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        220
+      ]
     }
   ],
   "connections": {
-    "Webhook slots": { "main": [[{ "node": "Слоты", "type": "main", "index": 0 }]] },
-    "Слоты": { "main": [[{ "node": "Ответ slots", "type": "main", "index": 0 }]] },
-    "Webhook book": { "main": [[{ "node": "Бронь", "type": "main", "index": 0 }]] },
-    "Бронь": { "main": [[{ "node": "Ответ book", "type": "main", "index": 0 }]] }
+    "Webhook slots": {
+      "main": [
+        [
+          {
+            "node": "Слоты",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Слоты": {
+      "main": [
+        [
+          {
+            "node": "Ответ slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook book": {
+      "main": [
+        [
+          {
+            "node": "Бронь",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Бронь": {
+      "main": [
+        [
+          {
+            "node": "Ответ book",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook my": {
+      "main": [
+        [
+          {
+            "node": "Мои записи",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Мои записи": {
+      "main": [
+        [
+          {
+            "node": "Ответ my",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook cancel": {
+      "main": [
+        [
+          {
+            "node": "Отмена",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отмена": {
+      "main": [
+        [
+          {
+            "node": "Ответ cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" },
-  "meta": { "instanceId": "live-stand-ct100" }
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "live-stand-ct100"
+  }
 }

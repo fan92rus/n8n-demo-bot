@@ -5,6 +5,9 @@
   POST /webhook/demo/slots    {}              -> {"ok":true,"slots":[{"id":...,"label":...,"start":...}]}
   POST /webhook/demo/book     {"slot_id","user"} -> {"ok":true,"booking":{...}}
   POST /webhook/demo/wizard   {"sel": ...}    -> {"text":...,"buttons":[[{"text","callback_data"}]]}
+  POST /webhook/demo/my       {"user"}        -> {"ok":true,"bookings":[{"slot_id","start","user"}]}
+  POST /webhook/demo/cancel   {"slot_id","user"} -> {"ok":true,"freed":...} | {"ok":false,"error":...}
+  POST /webhook/demo/leads    {}              -> {"ok":true,"leads":[{"user","text","category",...}]}
 """
 
 from __future__ import annotations
@@ -27,8 +30,11 @@ class N8nClient:
         self._timeout = timeout
         self._transport = transport
 
-    async def classify(self, text: str) -> dict:
-        return await self._post("/webhook/demo/classify", {"text": text})
+    async def classify(self, text: str, user: str | None = None) -> dict:
+        payload: dict = {"text": text}
+        if user:
+            payload["user"] = user
+        return await self._post("/webhook/demo/classify", payload)
 
     async def slots(self) -> list[dict]:
         data = await self._post("/webhook/demo/slots", {})
@@ -47,6 +53,18 @@ class N8nClient:
         текст и новую раскладку кнопок (кнопки меняются по шагам).
         """
         return await self._post("/webhook/demo/wizard", {"sel": sel})
+
+    async def my_bookings(self, user: str) -> dict:
+        """Список броней пользователя (демо-стенд хранит их в staticData)."""
+        return await self._post("/webhook/demo/my", {"user": user})
+
+    async def cancel_booking(self, slot_id: str, user: str) -> dict:
+        """Отмена своей брони — слот снова попадает в /slots."""
+        return await self._post("/webhook/demo/cancel", {"slot_id": slot_id, "user": user})
+
+    async def leads(self) -> dict:
+        """Очередь заявок (лидов), собранная классификатором — вид менеджера."""
+        return await self._post("/webhook/demo/leads", {})
 
     async def _post(self, path: str, payload: dict) -> dict:
         try:

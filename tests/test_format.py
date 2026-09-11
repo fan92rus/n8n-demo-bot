@@ -34,3 +34,16 @@ def test_format_booking_ok():
 def test_format_booking_failure():
     s = format_booking({"ok": False, "error": "занят"})
     assert "Не получилось" in s
+
+
+def test_format_leads_empty():
+    from bot.format import format_leads
+
+    assert "Лидов пока нет" in format_leads([])
+
+
+def test_format_leads_list():
+    from bot.format import format_leads
+
+    out = format_leads([{"user": "@t", "category": "интеграция", "priority": "высокий", "summary": "CRM"}])
+    assert "интеграция" in out and "@t" in out

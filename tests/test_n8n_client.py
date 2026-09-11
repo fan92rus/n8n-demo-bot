@@ -105,3 +105,58 @@ async def test_wizard_step_passthrough():
     r = await make_client(handler).wizard("srv:consult")
     assert r["text"].startswith("Шаг 2/3")
     assert r["buttons"][0][0]["callback_data"].startswith("wz:time:")
+
+
+@pytest.mark.asyncio
+async def test_classify_passes_user():
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        assert body["text"] == "нужен бот"
+        assert body["user"] == "@tester"
+        return httpx.Response(200, json={"ok": True, "category": "бот"})
+
+    r = await make_client(handler).classify("нужен бот", "@tester")
+    assert r["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_my_bookings():
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        assert body["user"] == "@tester"
+        return httpx.Response(
+            200,
+            json={"ok": True, "bookings": [{"slot_id": "2026-09-14-1000", "start": "2026-09-14 10:00", "user": "@tester"}]},
+        )
+
+    r = await make_client(handler).my_bookings("@tester")
+    assert r["bookings"][0]["slot_id"] == "2026-09-14-1000"
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking():
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        assert body["slot_id"] == "2026-09-14-1000"
+        assert body["user"] == "@tester"
+        return httpx.Response(200, json={"ok": True, "freed": "2026-09-14 10:00"})
+
+    r = await make_client(handler).cancel_booking("2026-09-14-1000", "@tester")
+    assert r["ok"] is True
+    assert "freed" in r
+
+
+@pytest.mark.asyncio
+async def test_leads():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/webhook/demo/leads"
+        return httpx.Response(200, json={"ok": True, "leads": [{"user": "@t", "category": "интеграция", "priority": "высокий", "summary": "CRM"}]})
+
+    r = await make_client(handler).leads()
+    assert r["leads"][0]["category"] == "интеграция"
