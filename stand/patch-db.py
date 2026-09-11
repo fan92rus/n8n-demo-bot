@@ -1,6 +1,8 @@
 """Патч demo-09/demo-10 на CT100: обновить ноды/связи + зарегистрировать новые вебхуки.
 Запуск: python3 patch-db.py /root/n8n-demo-bot/stand. Рестарт контейнера — снаружи."""
-import json, sqlite3, sys
+import json
+import sqlite3
+import sys
 
 stand = sys.argv[1] if len(sys.argv) > 1 else '/root/n8n-demo-bot/stand'
 db = sqlite3.connect('/root/n8n/data/database.sqlite')

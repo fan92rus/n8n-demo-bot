@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 
 from aiogram import Bot, Dispatcher, F
@@ -25,6 +26,7 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 from bot.config import BOT_TOKEN, N8N_BASE_URL, N8N_TIMEOUT
@@ -137,6 +139,9 @@ async def cb_wizard(q: CallbackQuery) -> None:
 async def cmd_start(m: Message) -> None:
     await safe_answer(m, WELCOME)
     await m.answer("Меню всегда под клавиатурой 👇", reply_markup=MENU_KB)
+    kb = miniapp_kb()
+    if kb:
+        await safe_answer(m, "Каталог, слоты и запись — прямо в Telegram:", kb)
 
 
 @dp.message(Command("help"))
@@ -177,6 +182,15 @@ async def btn_slots(m: Message) -> None:
 @dp.message(F.text == BTN_HELP)
 async def btn_help(m: Message) -> None:
     await safe_answer(m, WELCOME)
+
+
+def miniapp_kb() -> InlineKeyboardMarkup | None:
+    """Кнопка мини-аппа; Telegram принимает только https-URL."""
+    if not WEBAPP_URL.startswith("https://"):
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🖥 Открыть мини-апп", web_app=WebAppInfo(url=WEBAPP_URL))]]
+    )
 
 
 @dp.message(F.text == BTN_CLASSIFY)
@@ -237,6 +251,9 @@ async def cb_book(q: CallbackQuery) -> None:
         text = "Запись недоступна, попробуйте позже."
     await q.message.edit_text(text)  # type: ignore[union-attr]
     await q.answer()
+
+
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
 
 def display_name(u) -> str:
