@@ -151,3 +151,25 @@ async def test_cancel_booking():
     assert r["ok"] is True
     assert "freed" in r
 
+
+
+@pytest.mark.asyncio
+async def test_post_rejects_non_dict():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[1, 2, 3])
+
+    with pytest.raises(N8nError):
+        await make_client(handler).classify("тест")
+
+
+@pytest.mark.asyncio
+async def test_slots_filters_bad_items():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"slots": [{"id": "2026-09-14-1000", "label": "утро"}, 42, "x", {"label": "нет id"}, None]},
+        )
+
+    slots = await make_client(handler).slots()
+    assert len(slots) == 1
+    assert slots[0]["id"] == "2026-09-14-1000"

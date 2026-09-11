@@ -8,6 +8,7 @@
   POST /webhook/demo/my       {"user"}        -> {"ok":true,"bookings":[{"slot_id","start","user"}]}
   POST /webhook/demo/cancel   {"slot_id","user"} -> {"ok":true,"freed":...} | {"ok":false,"error":...}
   POST /webhook/demo/leads    {}              -> {"ok":true,"leads":[{"user","text","category",...}]}
+  POST /webhook/demo/lead_date {"user","date"} -> {"ok":true} — дата на последнюю открытую заявку
 """
 
 from __future__ import annotations
@@ -38,9 +39,13 @@ class N8nClient:
 
     async def slots(self) -> list[dict]:
         data = await self._post("/webhook/demo/slots", {})
-        slots = data.get("slots", []) if isinstance(data, dict) else data
-        if not isinstance(slots, list):
+        raw = data.get("slots", []) if isinstance(data, dict) else data
+        if not isinstance(raw, list):
             raise N8nError("n8n вернул slots не списком")
+        slots: list[dict] = []
+        for s in raw:
+            if isinstance(s, dict) and isinstance(s.get("id"), str) and s["id"]:
+                slots.append(s)
         return slots
 
     async def book(self, slot_id: str, user: str) -> dict:
@@ -73,8 +78,11 @@ class N8nClient:
             ) as client:
                 resp = await client.post(f"{self._base}{path}", json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
         except httpx.HTTPError as e:
             raise N8nError(f"n8n {path}: {e}") from e
         except ValueError as e:
             raise N8nError(f"n8n {path}: ответ не JSON ({e})") from e
+        if not isinstance(data, dict):
+            raise N8nError(f"n8n {path}: ответ не объект ({type(data).__name__})")
+        return data

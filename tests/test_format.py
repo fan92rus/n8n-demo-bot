@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bot.format import format_classify, format_slots
+from bot.format import format_booking, format_classify, format_slots
 
 
 def test_format_classify_full():
@@ -25,3 +25,20 @@ def test_format_slots_list():
     s = format_slots([{"id": "s1", "label": "Пн 10:00", "start": "10:00"}])
     assert "Пн 10:00" in s and "/book" not in s
 
+
+
+def test_format_booking_null_booking():
+    # контракт {"ok":true,"booking":null} не должен ронять форматтер
+    assert "Записал" in format_booking({"ok": True, "booking": None})
+
+
+def test_format_slots_none_labels():
+    slots = [{"id": "s1", "label": None, "start": "2026-09-14T10:00"}, {"id": "s2", "label": "день"}]
+    out = format_slots(slots)
+    assert "None" not in out
+    assert "s1" in out and "день" in out
+
+
+def test_format_classify_long_summary_capped():
+    out = format_classify({"category": "бот", "priority": "высокий", "summary": "х" * 5000})
+    assert len(out) < 2000
