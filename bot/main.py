@@ -54,7 +54,7 @@ WELCOME = (
     "• /my — ваши записи и отмена\n"
     "• Если из текста непонятно — уточню тему; если понятно — предложу слот\n"
     "   консультации и впишу его в заявку (вместе с вашим исходным текстом)\n"
-    "• Заявки — в мини-аппе (кнопка «🖥 Мини-апп»)"
+    "• Заявки — в мини-аппе (кнопка «🖥 Открыть мини-апп» в /start)"
 )
 
 # Постоянное меню-клавиатура (кнопки под полем ввода)
@@ -63,20 +63,14 @@ BTN_SLOTS = "📅 Слоты"
 BTN_WIZARD = "🪄 Подбор услуги"
 BTN_MY = "🗂 Мои записи"
 BTN_HELP = "ℹ️ Помощь"
-BTN_MINIAPP = "🖥 Мини-апп"
 
 
 def _menu_rows() -> list:
-    rows = [
+    return [
         [KeyboardButton(text=BTN_CLASSIFY), KeyboardButton(text=BTN_SLOTS)],
         [KeyboardButton(text=BTN_WIZARD), KeyboardButton(text=BTN_MY)],
+        [KeyboardButton(text=BTN_HELP)],
     ]
-    last = []
-    if WEBAPP_URL.startswith("https://"):
-        last.append(KeyboardButton(text=BTN_MINIAPP, web_app=WebAppInfo(url=WEBAPP_URL)))
-    last.append(KeyboardButton(text=BTN_HELP))
-    rows.append(last)
-    return rows
 
 
 MENU_KB = ReplyKeyboardMarkup(

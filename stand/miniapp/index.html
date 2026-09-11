@@ -59,16 +59,6 @@
     <div class="slots" id="slots" style="margin-top:8px">Загрузка…</div>
   </div>
 
-  <div class="card">
-    <b>Мои записи</b> <a href="#" id="my-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
-    <div id="my-id" class="muted" style="font-size:11px;margin-top:4px"></div>
-    <div style="margin-top:4px">
-      <input id="my-input" placeholder="@username" style="display:none;background:#1e2c44;border:1px solid #2a3a55;color:#e8eef7;border-radius:6px;padding:4px 8px;font-size:12px">
-      <a id="my-save" href="#" style="display:none;font-size:12px;color:#64b5f6;margin-left:6px">запомнить</a>
-    </div>
-    <div id="my" class="muted" style="margin-top:6px">…</div>
-  </div>
-
   <button id="go" disabled>Записаться</button>
   <div id="msg" class="muted" style="margin-top:8px"></div>
 
@@ -81,45 +71,13 @@ const SERVICES = [
 ];
 let svc = null, slot = null, user = 'гость';
 
-function detectUser() {
-  try {
-    const tg = window.Telegram && window.Telegram.WebApp;
-    if (!tg) return false;
-    tg.ready(); tg.expand();
+try {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { tg.ready(); tg.expand();
     const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
-    if (u) { user = u.username ? '@' + u.username : String(u.id); return true; }
-  } catch (e) {}
-  return false;
-}
-// из прошлой сессии — сразу, Telegram ждать не заставляем
-const savedUser = localStorage.getItem('mm_user');
-if (savedUser) user = savedUser;
-
-function guestUI(on) {
-  $('my-input').style.display = on ? '' : 'none';
-  $('my-save').style.display = on ? '' : 'none';
-}
-// initDataUnsafe при открытии из reply-кнопки может приходить с большой задержкой — ждём до 5с
-if (!detectUser()) {
-  let tries = 0;
-  const t = setInterval(() => {
-    if (detectUser() || ++tries >= 25) {
-      clearInterval(t);
-      if (user === 'гость') guestUI(true); else localStorage.setItem('mm_user', user);
-      loadMy(); loadLeads();
-    }
-  }, 200);
-}
-$('my-save').onclick = ev => {
-  ev.preventDefault();
-  let v = $('my-input').value.trim();
-  if (!v) return;
-  if (!v.startsWith('@') && !/^\d+$/.test(v)) v = '@' + v;
-  user = v;
-  localStorage.setItem('mm_user', v);
-  guestUI(false);
-  loadMy(); loadLeads();
-};
+    if (u) user = u.username ? '@' + u.username : String(u.id);
+  }
+} catch (e) {}
 
 const $ = id => document.getElementById(id);
 
@@ -181,28 +139,6 @@ async function loadSlots() {
   } catch (e) { $('slots').innerHTML = '<span class="err">Сервис недоступен: ' + e.message + '</span>'; }
 }
 
-async function loadMy() {
-  const idEl = $('my-id');
-  idEl.textContent = user === 'гость'
-    ? 'Профиль не определён — откройте мини-апп кнопкой из бота'
-    : 'профиль: ' + user;
-  if (user === 'гость') { $('my').innerHTML = '<span class="muted">Без профиля записи не видны</span>'; return; }
-  try {
-    const d = await post('/demo/my', { user });
-    const b = d.bookings || [];
-    $('my').innerHTML = b.length
-      ? '<ul>' + b.map(x => `<li>${x.start} <a href="#" style="color:#ef5350" data-id="${x.slot_id}">отменить</a></li>`).join('') + '</ul>'
-      : '<span class="muted">Записей нет</span>';
-    document.querySelectorAll('#my a').forEach(a => a.onclick = async ev => {
-      ev.preventDefault();
-      try { const r = await post('/demo/cancel', { slot_id: a.dataset.id, user });
-            $('msg').innerHTML = r.ok ? '<span class="ok">Отменено</span>' : '<span class="err">' + (r.error || 'ошибка') + '</span>';
-            loadMy(); loadSlots();
-      } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
-    });
-  } catch (e) { $('my').innerHTML = '<span class="err">Сервис недоступен</span>'; }
-}
-
 function refreshGo() { $('go').disabled = !(svc && slot); }
 
 $('go').onclick = async () => {
@@ -213,17 +149,16 @@ $('go').onclick = async () => {
     $('msg').innerHTML = r.ok
       ? `<span class="ok">✅ Записан: ${r.booking.start}. Подтверждение — у бота.</span>`
       : '<span class="err">' + (r.error || 'ошибка') + '</span>';
-    slot = null; loadSlots(); loadMy();
+    slot = null; loadSlots();
   } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
   refreshGo();
 };
 
-renderServices(); loadSlots(); loadMy(); loadLeads(); refreshGo();
-$('my-refresh').onclick = ev => { ev.preventDefault(); loadMy(); loadSlots(); };
+renderServices(); loadSlots(); loadLeads(); refreshGo();
 $('leads-refresh').onclick = ev => { ev.preventDefault(); loadLeads(); };
-// Возврат в открытое окно мини-аппа (запись могла случиться в боте) — обновляем всё
+// Возврат в открытое окно мини-аппа — обновляем данные
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { loadSlots(); loadMy(); loadLeads(); }
+  if (document.visibilityState === 'visible') { loadSlots(); loadLeads(); }
 });
 </script>
 </body>
