@@ -46,7 +46,7 @@
   </div>
 
   <div class="card">
-    <b>📋 Мои заявки</b>
+    <b>📋 Мои заявки</b> <a href="#" id="leads-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
     <div id="leads" class="muted" style="margin-top:6px">…</div>
   </div>
 
@@ -60,7 +60,7 @@
   </div>
 
   <div class="card">
-    <b>Мои записи</b>
+    <b>Мои записи</b> <a href="#" id="my-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
     <div id="my" class="muted" style="margin-top:6px">…</div>
   </div>
 
@@ -76,13 +76,23 @@ const SERVICES = [
 ];
 let svc = null, slot = null, user = 'гость';
 
-try {
-  const tg = window.Telegram && window.Telegram.WebApp;
-  if (tg) { tg.ready(); tg.expand();
+function detectUser() {
+  try {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return false;
+    tg.ready(); tg.expand();
     const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
-    if (u) user = u.username ? '@' + u.username : String(u.id);
-  }
-} catch (e) {}
+    if (u) { user = u.username ? '@' + u.username : String(u.id); return true; }
+  } catch (e) {}
+  return false;
+}
+// initDataUnsafe в некоторых клиентах приходит с задержкой — ждём до 1с
+if (!detectUser()) {
+  let tries = 0;
+  const t = setInterval(() => {
+    if (detectUser() || ++tries >= 5) { clearInterval(t); loadMy(); loadLeads(); }
+  }, 200);
+}
 
 const $ = id => document.getElementById(id);
 
@@ -177,6 +187,12 @@ $('go').onclick = async () => {
 };
 
 renderServices(); loadSlots(); loadMy(); loadLeads(); refreshGo();
+$('my-refresh').onclick = ev => { ev.preventDefault(); loadMy(); loadSlots(); };
+$('leads-refresh').onclick = ev => { ev.preventDefault(); loadLeads(); };
+// Возврат в открытое окно мини-аппа (запись могла случиться в боте) — обновляем всё
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { loadSlots(); loadMy(); loadLeads(); }
+});
 </script>
 </body>
 </html>
