@@ -61,6 +61,7 @@
 
   <div class="card">
     <b>Мои записи</b> <a href="#" id="my-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
+    <div id="my-id" class="muted" style="font-size:11px;margin-top:4px"></div>
     <div id="my" class="muted" style="margin-top:6px">…</div>
   </div>
 
@@ -155,6 +156,11 @@ async function loadSlots() {
 }
 
 async function loadMy() {
+  const idEl = $('my-id');
+  idEl.textContent = user === 'гость'
+    ? 'Профиль не определён — откройте мини-апп кнопкой из бота'
+    : 'профиль: ' + user;
+  if (user === 'гость') { $('my').innerHTML = '<span class="muted">Без профиля записи не видны</span>'; return; }
   try {
     const d = await post('/demo/my', { user });
     const b = d.bookings || [];
