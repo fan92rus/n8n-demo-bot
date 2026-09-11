@@ -4,6 +4,7 @@
 публичных вебхуков/TLS) -> n8n webhooks по LAN. Интерактив:
   /start — меню
   /classify <текст> или просто текст — ИИ-классификатор заявки
+  /wizard — подбор услуги: кнопки меняются по шагам (n8n возвращает новую раскладку)
   /slots — свободные слоты (inline-кнопки)
   /book <id> — запись на слот
 """
@@ -40,6 +41,7 @@ WELCOME = (
     "Привет! Я демо-бот IT-студии: покажу, как заявки и запись клиентов "
     "работают через n8n.\n\n"
     "• Кинь текст заявки (или /classify <текст>) — ИИ определит категорию\n"
+    "• /wizard — подбор услуги за 3 клика (кнопки меняются по шагам)\n"
     "• /slots — свободные слоты для записи\n"
     "• /book <id> — записаться"
 )
@@ -47,12 +49,13 @@ WELCOME = (
 # Постоянное меню-клавиатура (кнопки под полем ввода)
 BTN_CLASSIFY = "🧾 Классификация"
 BTN_SLOTS = "📅 Слоты"
+BTN_WIZARD = "🪄 Подбор услуги"
 BTN_HELP = "ℹ️ Помощь"
 
 MENU_KB = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=BTN_CLASSIFY), KeyboardButton(text=BTN_SLOTS)],
-        [KeyboardButton(text=BTN_HELP)],
+        [KeyboardButton(text=BTN_WIZARD), KeyboardButton(text=BTN_HELP)],
     ],
     resize_keyboard=True,
     input_field_placeholder="Текст заявки можно писать прямо сюда",
@@ -63,16 +66,64 @@ BOT_COMMANDS = [
     BotCommand(command="classify", description="Классификация заявки"),
     BotCommand(command="slots", description="Свободные слоты"),
     BotCommand(command="book", description="Запись: /book <id>"),
+    BotCommand(command="wizard", description="Подбор услуги (кнопки по шагам)"),
     BotCommand(command="help", description="Помощь"),
 ]
 
 
-async def safe_answer(m: Message, text: str) -> None:
+async def safe_answer(m: Message, text: str, kb: InlineKeyboardMarkup | None = None) -> None:
     """Ответ с подавлением сетевых сбоев, чтобы воркер не падал."""
     try:
-        await m.answer(text)
+        await m.answer(text, reply_markup=kb)
     except Exception:  # noqa: BLE001
         log.exception("answer failed")
+
+
+def kb_from_buttons(rows: list | None) -> InlineKeyboardMarkup | None:
+    """Раскладка wizard'а из ответа n8n: [[{"text","callback_data"}]]."""
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=b["text"], callback_data=b["callback_data"]) for b in row]
+            for row in rows
+        ]
+    )
+
+
+async def run_wizard(m: Message, sel: str = "start") -> None:
+    try:
+        step = await n8n.wizard(sel)
+    except N8nError:
+        await safe_answer(m, "Сервис недоступен, попробуйте позже.")
+        return
+    await safe_answer(m, step.get("text", "…"), kb_from_buttons(step.get("buttons")))
+
+
+@dp.message(Command("wizard"))
+async def cmd_wizard(m: Message) -> None:
+    await run_wizard(m)
+
+
+@dp.message(F.text == BTN_WIZARD)
+async def btn_wizard(m: Message) -> None:
+    await run_wizard(m)
+
+
+@dp.callback_query(F.data.startswith("wz:"))
+async def cb_wizard(q: CallbackQuery) -> None:
+    sel = (q.data or "")[3:64]
+    try:
+        step = await n8n.wizard(sel)
+        text = step.get("text", "…")
+        kb = kb_from_buttons(step.get("buttons"))
+    except N8nError:
+        text, kb = "Сервис недоступен, попробуйте позже.", None
+    try:
+        await q.message.edit_text(text, reply_markup=kb)  # type: ignore[union-attr]
+    except Exception:  # noqa: BLE001
+        pass  # текст/клавиатура не изменились — Telegram вернёт ошибку, это нормально
+    await q.answer()
 
 
 @dp.message(Command("start"))

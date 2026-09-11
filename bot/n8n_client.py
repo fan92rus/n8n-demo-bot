@@ -4,6 +4,7 @@
   POST /webhook/demo/classify {"text": ...}   -> {"ok":true,"category":...,"priority":...,"summary":...}
   POST /webhook/demo/slots    {}              -> {"ok":true,"slots":[{"id":...,"label":...,"start":...}]}
   POST /webhook/demo/book     {"slot_id","user"} -> {"ok":true,"booking":{...}}
+  POST /webhook/demo/wizard   {"sel": ...}    -> {"text":...,"buttons":[[{"text","callback_data"}]]}
 """
 
 from __future__ import annotations
@@ -38,6 +39,14 @@ class N8nClient:
 
     async def book(self, slot_id: str, user: str) -> dict:
         return await self._post("/webhook/demo/book", {"slot_id": slot_id, "user": user})
+
+    async def wizard(self, sel: str) -> dict:
+        """Один шаг wizard'а: sel='start' или состояние из callback_data (текст после 'wz:').
+
+        Бот stateless — всё состояние шага передаётся в кнопках; n8n возвращает
+        текст и новую раскладку кнопок (кнопки меняются по шагам).
+        """
+        return await self._post("/webhook/demo/wizard", {"sel": sel})
 
     async def _post(self, path: str, payload: dict) -> dict:
         try:

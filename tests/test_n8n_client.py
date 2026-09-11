@@ -83,3 +83,25 @@ async def test_book_sends_slot_and_user():
 
     r = await make_client(handler).book("s2", "@tester")
     assert r["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_wizard_step_passthrough():
+    """wizard() передаёт sel в n8n и возвращает текст+кнопки как есть."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/webhook/demo/wizard"
+        import json
+
+        body = json.loads(request.content)
+        assert body["sel"] == "srv:consult"
+        return httpx.Response(
+            200,
+            json={
+                "text": "Шаг 2/3: выберите время",
+                "buttons": [[{"text": "📅 слот", "callback_data": "wz:time:2026-09-14-1000:consult"}]],
+            },
+        )
+
+    r = await make_client(handler).wizard("srv:consult")
+    assert r["text"].startswith("Шаг 2/3")
+    assert r["buttons"][0][0]["callback_data"].startswith("wz:time:")
