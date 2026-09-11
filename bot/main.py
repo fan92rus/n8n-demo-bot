@@ -40,6 +40,10 @@ dp = Dispatcher()
 n8n = N8nClient(N8N_BASE_URL, timeout=N8N_TIMEOUT)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
+# Незавершённые уточнения заявок: chat_id -> первый (туманный) текст. В памяти процесса:
+# после рестарта контейнера пользователь просто напишет заявку заново.
+PENDING_CLARIFY: dict[int, str] = {}
+
 WELCOME = (
     "Привет! Я демо-бот IT-студии: заявки и запись клиентов работают через n8n.\n\n"
     "• Напишите текстом, что нужно сделать, — это станет вашей заявкой\n"
@@ -48,6 +52,8 @@ WELCOME = (
     "• /slots — свободные слоты, запись в один клик\n"
     "• /wizard — подбор услуги за 3 клика\n"
     "• /my — ваши записи и отмена\n"
+    "• Если из текста непонятно — уточню тему; если понятно — предложу слот\n"
+    "   консультации и впишу его в заявку (вместе с вашим исходным текстом)\n"
     "• Заявки — в мини-аппе (кнопка «🖥 Мини-апп»)"
 )
 
@@ -173,8 +179,18 @@ async def run_classify(m: Message, text: str) -> None:
             "«нужен бот, который принимает заявки с сайта в Google-таблицу» — и я оформлю заявку."
         )
         return
-    saved = "" if result.get("lead_saved") is False else "\n\n✅ Заявка сохранена — она в мини-аппе («Мои заявки»)."
-    await wait.edit_text(format_classify(result) + saved)
+    if result.get("lead_saved") is False:
+        # похожe на заявку, но LLM просит уточнение — не сохраняем, задаём вопрос
+        q = result.get("clarify_question") or "Уточните, пожалуйста, что именно нужно сделать."
+        PENDING_CLARIFY[m.chat.id] = text
+        await wait.edit_text(f"Чтобы оформить заявку, уточню: {q}")
+        return
+    PENDING_CLARIFY.pop(m.chat.id, None)
+    await wait.edit_text(
+        format_classify(result)
+        + "\n\n✅ Заявка сохранена — она в мини-аппе («Мои заявки»)."
+    )
+    await offer_consult(m, user)
 
 
 @dp.message(Command("classify"))
@@ -263,6 +279,54 @@ async def cb_book(q: CallbackQuery) -> None:
 
 
 
+async def offer_consult(m: Message, user: str) -> None:
+    """После сохранённой заявки — предложить слот консультации (пойдёт в заявку)."""
+    try:
+        slots = await n8n.slots()
+    except N8nError:
+        return  # заявка уже сохранена; консультация согласуется менеджером
+    if not slots:
+        return
+    rows = [
+        [InlineKeyboardButton(
+            text=f"📅 {s.get('start', s.get('id'))}" + (f" {s['label']}" if s.get("label") else ""),
+            callback_data=f"lc:{s.get('id')}",
+        )]
+        for s in slots[:6]
+    ]
+    rows.append([InlineKeyboardButton(text="Без консультации", callback_data="lc:skip")])
+    await m.answer(
+        "Выберите дату консультации — добавлю её в заявку:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+
+
+@dp.callback_query(F.data.startswith("lc:"))
+async def cb_lead_consult(q: CallbackQuery) -> None:
+    val = (q.data or "").split(":", 1)[1]
+    user = display_name(q.from_user)
+    if val == "skip":
+        await q.message.edit_text("Хорошо — менеджер свяжется с вами и согласует время.")  # type: ignore[union-attr]
+        await q.answer()
+        return
+    try:
+        res = await n8n.book(val, user)
+        if not res.get("ok", True):
+            await q.message.edit_text("Этот слот только что заняли — загляните в /slots.")  # type: ignore[union-attr]
+            await q.answer()
+            return
+        label = str((res.get("booking") or {}).get("start") or val)
+        try:
+            await n8n.lead_date(user, label)
+        except N8nError:
+            pass  # бронь есть, дату в заявку допишет менеджер
+        text = f"✅ Заявка зарегистрирована. Консультация — {label}. Подробности в мини-аппе («Мои заявки»)."
+    except N8nError:
+        text = "Запись недоступна, попробуйте позже."
+    await q.message.edit_text(text)  # type: ignore[union-attr]
+    await q.answer()
+
+
 def display_name(u) -> str:
     """Кого показывать в записях и лидах: @username или id."""
     return f"@{u.username}" if u and u.username else str(getattr(u, "id", "?"))
@@ -314,7 +378,11 @@ async def cb_mycancel(q: CallbackQuery) -> None:
 @dp.message(F.text)
 async def free_text(m: Message) -> None:
     """Любой свободный текст = заявка на классификацию (интерактивная демка)."""
-    await run_classify(m, m.text or "")
+    text = m.text or ""
+    pending = PENDING_CLARIFY.pop(m.chat.id, None)
+    if pending:
+        text = f"{pending}\nДополнение: {text}"  # контекст уточнения — заявка по двум сообщениям
+    await run_classify(m, text)
 
 
 async def main() -> None:

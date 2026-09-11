@@ -117,7 +117,9 @@ async function loadLeads() {
     const d = await post('/demo/leads', { user });
     const l = d.leads || [];
     $('leads').innerHTML = l.length
-      ? '<ul>' + l.map(x => `<li><b>${x.category}</b> / ${x.priority} — ${x.summary || x.text} <span class="muted">(${(x.ts || '').slice(0, 16).replace('T', ' ')})</span></li>`).join('') + '</ul>'
+      ? '<ul>' + l.map(x => `<li><b>${x.category}</b> / ${x.priority}${x.date ? ' · 📅 ' + x.date : ''} — ${x.summary || x.text}` +
+        (x.source_msg && x.source_msg !== x.summary ? `<br><span class="muted" style="white-space:pre-wrap">«${x.source_msg}»</span>` : '') +
+        ` <span class="muted">(${(x.ts || '').slice(0, 16).replace('T', ' ')})</span></li>`).join('') + '</ul>'
       : 'Заявок пока нет — оставьте первую выше.';
   } catch (e) { $('leads').innerHTML = '<span class="err">Сервис недоступен</span>'; }
 }

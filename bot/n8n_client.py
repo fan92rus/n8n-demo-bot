@@ -46,6 +46,10 @@ class N8nClient:
     async def book(self, slot_id: str, user: str) -> dict:
         return await self._post("/webhook/demo/book", {"slot_id": slot_id, "user": user})
 
+    async def lead_date(self, user: str, date: str) -> dict:
+        """Проставить дату консультации последней открытой заявке пользователя."""
+        return await self._post("/webhook/demo/lead_date", {"user": user, "date": date})
+
     async def wizard(self, sel: str) -> dict:
         """Один шаг wizard'а: sel='start' или состояние из callback_data (текст после 'wz:').
 
