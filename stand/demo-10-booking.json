@@ -7,7 +7,9 @@
         "httpMethod": "POST",
         "path": "demo/slots",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-slots",
       "name": "Webhook slots",
@@ -24,7 +26,9 @@
         "httpMethod": "POST",
         "path": "demo/book",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-book",
       "name": "Webhook book",
@@ -97,7 +101,9 @@
         "httpMethod": "POST",
         "path": "demo/my",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "demo-my",
       "name": "Webhook my",
@@ -142,7 +148,9 @@
         "httpMethod": "POST",
         "path": "demo/cancel",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "demo-cancel",
       "name": "Webhook cancel",

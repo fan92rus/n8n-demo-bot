@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IT-студия — запись</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 14px;
+         background: var(--tg-theme-bg-color, #17212b); color: var(--tg-theme-text-color, #fff); }
+  h1 { font-size: 18px; margin: 4px 0 2px; }
+  .sub { opacity: .6; font-size: 13px; margin-bottom: 14px; }
+  .card { background: var(--tg-theme-secondary-bg-color, #232e3c); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .svc { display: flex; justify-content: space-between; gap: 8px; padding: 10px; border-radius: 10px;
+         border: 1px solid #2f3b4a; margin-bottom: 8px; cursor: pointer; }
+  .svc.on { border-color: #2ea6ff; background: rgba(46,166,255,.12); }
+  .svc b { display: block; }
+  .svc span { opacity: .65; font-size: 13px; }
+  .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .slot { padding: 9px 6px; border-radius: 10px; border: 1px solid #2f3b4a; text-align: center; cursor: pointer; font-size: 13px; }
+  .slot.on { border-color: #2ea6ff; background: rgba(46,166,255,.12); }
+  button { width: 100%; padding: 12px; margin-top: 12px; border: 0; border-radius: 10px; font-size: 15px;
+           background: var(--tg-theme-button-color, #2ea6ff); color: var(--tg-theme-button-text-color, #fff); cursor: pointer; }
+  button:disabled { opacity: .5; }
+  .muted { opacity: .55; font-size: 13px; }
+  .ok { color: #4caf50; } .err { color: #ef5350; }
+  ul { margin: 6px 0 0; padding-left: 18px; }
+  li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <h1>🖥 Демо-мини-апп</h1>
+  <div class="sub">Каталог → слот → запись. Бэкенд: n8n-воркфлоу (demo-10), всё живьём.</div>
+
+  <div class="card">
+    <div id="svc-list">Загрузка услуг…</div>
+  </div>
+
+  <div class="card">
+    <b>Свободные слоты</b>
+    <div class="slots" id="slots" style="margin-top:8px">Загрузка…</div>
+  </div>
+
+  <div class="card">
+    <b>Мои записи</b>
+    <div id="my" class="muted" style="margin-top:6px">…</div>
+  </div>
+
+  <button id="go" disabled>Записаться</button>
+  <div id="msg" class="muted" style="margin-top:8px"></div>
+
+<script>
+const API = location.origin.replace(/:\d+$/, ':5678') + '/webhook';
+const SERVICES = [
+  { id: 'consult',    name: 'Консультация',      desc: 'ИИ/автоматизация — разбор задачи' },
+  { id: 'integration',name: 'Интеграция',        desc: 'CRM, таблицы, уведомления' },
+  { id: 'dev',        name: 'Разработка',        desc: 'Бот, мини-апп, бэкенд' },
+];
+let svc = null, slot = null, user = 'гость';
+
+try {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { tg.ready(); tg.expand();
+    const u = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (u) user = u.username ? '@' + u.username : (u.first_name || 'гость');
+  }
+} catch (e) {}
+
+const $ = id => document.getElementById(id);
+
+async function post(path, payload) {
+  const r = await fetch(API + path, { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                      body: JSON.stringify(payload) });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function renderServices() {
+  $('svc-list').innerHTML = SERVICES.map(s =>
+    `<div class="svc ${svc === s.id ? 'on' : ''}" data-id="${s.id}"><div><b>${s.name}</b><span>${s.desc}</span></div></div>`
+  ).join('');
+  document.querySelectorAll('.svc').forEach(el =>
+    el.onclick = () => { svc = svc === el.dataset.id ? null : el.dataset.id; renderServices(); refreshGo(); });
+}
+
+async function loadSlots() {
+  try {
+    const d = await post('/demo/slots', {});
+    $('slots').innerHTML = d.slots.length
+      ? d.slots.map(s => `<div class="slot ${slot === s.id ? 'on' : ''}" data-id="${s.id}" data-label="${s.label} ${s.start.slice(-5)}">${s.label}<br><span class="muted">${s.start}</span></div>`).join('')
+      : '<span class="muted">Свободных слотов нет</span>';
+    document.querySelectorAll('.slot').forEach(el =>
+      el.onclick = () => { slot = slot === el.dataset.id ? null : el.dataset.id; loadSlots(); refreshGo(); });
+  } catch (e) { $('slots').innerHTML = '<span class="err">Сервис недоступен: ' + e.message + '</span>'; }
+}
+
+async function loadMy() {
+  try {
+    const d = await post('/demo/my', { user });
+    const b = d.bookings || [];
+    $('my').innerHTML = b.length
+      ? '<ul>' + b.map(x => `<li>${x.start} <a href="#" style="color:#ef5350" data-id="${x.slot_id}">отменить</a></li>`).join('') + '</ul>'
+      : '<span class="muted">Записей нет</span>';
+    document.querySelectorAll('#my a').forEach(a => a.onclick = async ev => {
+      ev.preventDefault();
+      try { const r = await post('/demo/cancel', { slot_id: a.dataset.id, user });
+            $('msg').innerHTML = r.ok ? '<span class="ok">Отменено</span>' : '<span class="err">' + (r.error || 'ошибка') + '</span>';
+            loadMy(); loadSlots();
+      } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
+    });
+  } catch (e) { $('my').innerHTML = '<span class="err">Сервис недоступен</span>'; }
+}
+
+function refreshGo() { $('go').disabled = !(svc && slot); }
+
+$('go').onclick = async () => {
+  $('go').disabled = true;
+  $('msg').innerHTML = 'Записываю…';
+  try {
+    const r = await post('/demo/book', { slot_id: slot, user, service: svc });
+    $('msg').innerHTML = r.ok
+      ? `<span class="ok">✅ Записан: ${r.booking.start}. Подтверждение — у бота.</span>`
+      : '<span class="err">' + (r.error || 'ошибка') + '</span>';
+    slot = null; loadSlots(); loadMy();
+  } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
+  refreshGo();
+};
+
+renderServices(); loadSlots(); loadMy(); refreshGo();
+</script>
+</body>
+</html>

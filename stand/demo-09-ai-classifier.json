@@ -7,7 +7,9 @@
         "httpMethod": "POST",
         "path": "demo/classify",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-1",
       "name": "Webhook",
@@ -113,7 +115,9 @@
         "httpMethod": "POST",
         "path": "demo/leads",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "*"
+        }
       },
       "id": "wh-leads",
       "name": "Webhook leads",
