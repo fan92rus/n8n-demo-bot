@@ -46,7 +46,7 @@ WELCOME = (
     "• /wizard — подбор услуги за 3 клика (кнопки меняются по шагам)\n"
     "• /slots — свободные слоты для записи\n"
     "• /my — твои записи и отмена\n"
-    "• /leads — очередь заявок (вид менеджера)\n"
+    "• /leads — ваши заявки (видны только вам)\n"
     "• /book <id> — записаться"
 )
 
@@ -75,7 +75,7 @@ BOT_COMMANDS = [
     BotCommand(command="book", description="Запись: /book <id>"),
     BotCommand(command="wizard", description="Подбор услуги (кнопки по шагам)"),
     BotCommand(command="my", description="Мои записи и отмена"),
-    BotCommand(command="leads", description="Очередь заявок (менеджер)"),
+    BotCommand(command="leads", description="Ваши заявки (приватно)"),
     BotCommand(command="help", description="Помощь"),
 ]
 
@@ -308,12 +308,13 @@ async def cb_mycancel(q: CallbackQuery) -> None:
 @dp.message(F.text == BTN_LEADS)
 async def handler_leads(m: Message) -> None:
     try:
-        data = await n8n.leads()
+        data = await n8n.leads(user=display_name(m))
     except N8nError:
         await safe_answer(m, "Сервис недоступен, попробуйте позже.")
         return
     leads = data.get("leads", []) if isinstance(data, dict) else []
-    await safe_answer(m, format_leads(leads))
+    private = bool(data.get("leads_private", True)) if isinstance(data, dict) else True
+    await safe_answer(m, format_leads(leads, private=private))
 
 
 @dp.message(F.text)

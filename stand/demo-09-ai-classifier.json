@@ -131,7 +131,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Очередь заявок для менеджера: последние 20, свежие сверху\nconst staticData = $getWorkflowStaticData('global');\nstaticData.leads = staticData.leads || [];\nreturn [{ json: { ok: true, leads: staticData.leads.slice(-20).reverse() } }];"
+        "jsCode": "// Очередь заявок. Приватность: при leads_private=true пользователь видит только свои лиды\nconst cfg = $('Настройки демо').first().json;\nconst staticData = $getWorkflowStaticData('global');\nstaticData.leads = staticData.leads || [];\nconst user = (($('Webhook leads').first().json.body) || {}).user || '';\nlet leads = staticData.leads;\nif (cfg.leads_private) { leads = leads.filter(l => l.user && l.user === user); }\nconst max = cfg.leads_max || 20;\nreturn [{ json: { ok: true, leads_private: !!cfg.leads_private, total: leads.length, leads: leads.slice(-max).reverse() } }];"
       },
       "id": "code-leads",
       "name": "Лиды",
@@ -155,6 +155,51 @@
       "position": [
         440,
         220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "leads_private",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "a2",
+              "name": "leads_max",
+              "value": 20,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-leads-config",
+      "name": "Настройки демо",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1520,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚠️ Приватность лидов\nГалка **leads_private** в «Настройках демо»:\n- true — каждый пользователь видит ТОЛЬКО свои лиды;\n- false — видно все (режим менеджера).\nЛиды без user-поля при true не показываются никому.",
+        "height": 220,
+        "width": 320,
+        "color": 5
+      },
+      "id": "node-leads-note",
+      "name": "Пометка приватности",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1520,
+        600
       ]
     }
   ],
@@ -214,22 +259,33 @@
         ]
       ]
     },
-    "Webhook leads": {
+    "Лиды": {
       "main": [
         [
           {
-            "node": "Лиды",
+            "node": "Ответ leads",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Лиды": {
+    "Webhook leads": {
       "main": [
         [
           {
-            "node": "Ответ leads",
+            "node": "Настройки демо",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки демо": {
+      "main": [
+        [
+          {
+            "node": "Лиды",
             "type": "main",
             "index": 0
           }

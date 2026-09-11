@@ -34,11 +34,12 @@ def format_booking(booking: dict) -> str:
     )
 
 
-def format_leads(leads: list[dict]) -> str:
-    """Очередь заявок (лидов) для менеджера."""
+def format_leads(leads: list[dict], private: bool = True) -> str:
+    """Лиды. private=True — каждый видит только свои (галка leads_private в n8n)."""
     if not leads:
-        return "Лидов пока нет. Пришли боту текст заявки — попадёт в эту очередь."
-    lines = ["📋 Очередь заявок:"]
+        return "Своих заявок пока нет. Пришли боту текст заявки — она попадёт в очередь."
+    header = "📋 Ваши заявки (приватно — чужие скрыты):" if private else "📋 Все заявки (режим менеджера):"
+    lines = [header]
     for lead in leads[:15]:
         lines.append(
             f"• {lead.get('category', '?')} / {lead.get('priority', '?')} — "

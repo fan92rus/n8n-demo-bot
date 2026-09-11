@@ -39,7 +39,7 @@ def test_format_booking_failure():
 def test_format_leads_empty():
     from bot.format import format_leads
 
-    assert "Лидов пока нет" in format_leads([])
+    assert "Своих заявок пока нет" in format_leads([])
 
 
 def test_format_leads_list():
@@ -47,3 +47,11 @@ def test_format_leads_list():
 
     out = format_leads([{"user": "@t", "category": "интеграция", "priority": "высокий", "summary": "CRM"}])
     assert "интеграция" in out and "@t" in out
+    assert "приватно" in out  # приватный режим по умолчанию
+
+
+def test_format_leads_manager():
+    from bot.format import format_leads
+
+    out = format_leads([{"user": "@t", "category": "бот", "priority": "средний", "summary": "x"}], private=False)
+    assert "режим менеджера" in out

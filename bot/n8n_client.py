@@ -62,9 +62,9 @@ class N8nClient:
         """Отмена своей брони — слот снова попадает в /slots."""
         return await self._post("/webhook/demo/cancel", {"slot_id": slot_id, "user": user})
 
-    async def leads(self) -> dict:
-        """Очередь заявок (лидов), собранная классификатором — вид менеджера."""
-        return await self._post("/webhook/demo/leads", {})
+    async def leads(self, user: str | None = None) -> dict:
+        """Лиды. При user (и leads_private=true в workflow) видны только свои."""
+        return await self._post("/webhook/demo/leads", {"user": user or ""})
 
     async def _post(self, path: str, payload: dict) -> dict:
         try:
