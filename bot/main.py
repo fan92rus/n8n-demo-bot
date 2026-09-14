@@ -41,37 +41,44 @@ dp = Dispatcher()
 n8n = N8nClient(N8N_BASE_URL, timeout=N8N_TIMEOUT, sign_secret=DEMO_SIGN_SECRET)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
-# Незавершённые уточнения заявок: chat_id -> (текст, ts). В памяти процесса
+# Незавершённые уточнения заявок: ключ (chat_id, user_id) -> (текст, ts). В памяти процесса
 # (после рестарта контейнера пользователь просто напишет заявку заново).
+# Ключ с user_id — в группе дополнение не склеится с чужой заявкой (M6).
 # TTL 30 мин и кап 500 чатов — защита от утечки на брошенных диалогах.
-PENDING_CLARIFY: dict[int, tuple[str, float]] = {}
+PENDING_CLARIFY: dict[tuple[int, int], tuple[str, float]] = {}
 PENDING_TTL_S = 30 * 60
 PENDING_MAX_CHATS = 500
 CHAT_LOCKS: dict[int, asyncio.Lock] = {}
 
 
-def pending_put(chat_id: int, text: str) -> None:
-    PENDING_CLARIFY[chat_id] = (text, time.monotonic())
+def pending_key(chat_id: int, user_id: int) -> tuple[int, int]:
+    return (chat_id, user_id)
+
+
+def pending_put(chat_id: int, user_id: int, text: str) -> None:
+    key = pending_key(chat_id, user_id)
+    PENDING_CLARIFY[key] = (text, time.monotonic())
     if len(PENDING_CLARIFY) > PENDING_MAX_CHATS:
         oldest = sorted(PENDING_CLARIFY, key=lambda c: PENDING_CLARIFY[c][1])
         for c in oldest[: len(PENDING_CLARIFY) - PENDING_MAX_CHATS]:
             PENDING_CLARIFY.pop(c, None)
 
 
-def pending_get(chat_id: int) -> str | None:
-    item = PENDING_CLARIFY.get(chat_id)
+def pending_get(chat_id: int, user_id: int) -> str | None:
+    key = pending_key(chat_id, user_id)
+    item = PENDING_CLARIFY.get(key)
     if not item:
         return None
     text, ts = item
     if time.monotonic() - ts > PENDING_TTL_S:
-        PENDING_CLARIFY.pop(chat_id, None)
+        PENDING_CLARIFY.pop(key, None)
         return None
     return text
 
 
-def pending_pop(chat_id: int) -> str | None:
-    text = pending_get(chat_id)
-    PENDING_CLARIFY.pop(chat_id, None)
+def pending_pop(chat_id: int, user_id: int) -> str | None:
+    text = pending_get(chat_id, user_id)
+    PENDING_CLARIFY.pop(pending_key(chat_id, user_id), None)
     return text
 
 
@@ -184,6 +191,22 @@ async def safe_edit(q: CallbackQuery, text: str, kb: InlineKeyboardMarkup | None
         log.exception("edit failed")
 
 
+async def safe_m_edit(msg: Message, text: str, kb: InlineKeyboardMarkup | None = None) -> None:
+    """edit_text «Думаю…» с подавлением сбоев; при невозможности правки — дописываем.
+
+    Раньше сетевой сбой на edit_text ронял ветку и оставлял вечный спиннер (M5).
+    """
+    try:
+        await msg.edit_text(text, reply_markup=kb)
+        return
+    except Exception:  # noqa: BLE001
+        log.exception("edit_text failed")
+    try:
+        await msg.answer(text, reply_markup=kb)
+    except Exception:  # noqa: BLE001
+        log.exception("answer fallback failed")
+
+
 @dp.message(Command("wizard"))
 async def cmd_wizard(m: Message) -> None:
     await run_wizard(m)
@@ -209,7 +232,7 @@ async def cb_wizard(q: CallbackQuery) -> None:
 
 @dp.message(Command("start"))
 async def cmd_start(m: Message) -> None:
-    PENDING_CLARIFY.pop(m.chat.id, None)  # /start — сброс незавершённого уточнения
+    PENDING_CLARIFY.pop(pending_key(m.chat.id, get_user_id(m.from_user)), None)  # /start — сброс уточнения
     await safe_answer(m, WELCOME)
     await m.answer("Меню всегда под клавиатурой 👇", reply_markup=MENU_KB)
     kb = miniapp_kb()
@@ -226,38 +249,49 @@ async def run_classify(m: Message, text: str) -> None:
     async with chat_lock(m.chat.id):  # два быстрых сообщения — по очереди, без гонки за pending
         user = display_name(m.from_user)
         wait = await m.answer("Думаю…")
-        pending = pending_pop(m.chat.id)
+        pending = pending_pop(m.chat.id, get_user_id(m.from_user))
         if pending:
             text = f"{pending}\nДополнение: {text}"  # контекст уточнения — заявка по двум сообщениям
         try:
             result = await n8n.classify(text[:2000], user)
         except N8nError as e:
             if pending:
-                pending_put(m.chat.id, pending)  # сбой сервиса — уточнение не теряем
+                pending_put(m.chat.id, get_user_id(m.from_user), pending)  # сбой сервиса — уточнение не теряем
             log.warning("classify failed: %s", e)
-            await wait.edit_text("Сервис классификации недоступен, попробуйте позже.")
+            await safe_m_edit(wait, "Сервис классификации недоступен, попробуйте позже.")
             return
         if result.get("ok") is False:
-            # контролируемый отказ n8n (напр., пустой текст из мини-аппа)
-            await wait.edit_text(str(result.get("error") or "Не получилось, попробуйте ещё раз."))
+            # контролируемый отказ n8n (пустой текст, не прошла подпись и т.п.) — честная ошибка (S4)
+            await safe_m_edit(wait, str(result.get("error") or "Не получилось, попробуйте ещё раз."))
             return
         if result.get("is_request") is False:
-            await wait.edit_text(
+            await safe_m_edit(
+                wait,
                 "Похоже, это не заявка 🙂 Напишите, что нужно сделать, — например: "
-                "«нужен бот, который принимает заявки с сайта в Google-таблицу» — и я оформлю заявку."
+                "«нужен бот, который принимает заявки с сайта в Google-таблицу» — и я оформлю заявку.",
             )
             return
-        if result.get("needs_clarification") or result.get("lead_saved") is False:
+        if result.get("needs_clarification"):
             # похоже на заявку, но LLM просит уточнение — не сохраняем, задаём вопрос
             cq = result.get("clarify_question") or "Уточните, пожалуйста, что именно нужно сделать."
-            pending_put(m.chat.id, text[:1000])
-            await wait.edit_text(f"Чтобы оформить заявку, уточню: {cq}")
+            pending_put(m.chat.id, get_user_id(m.from_user), text[:1000])
+            await safe_m_edit(wait, f"Чтобы оформить заявку, уточню: {cq}")
             return
-        await wait.edit_text(
-            format_classify(result)
-            + "\n\n✅ Заявка сохранена — она в мини-аппе («Мои заявки»)."
+        if result.get("lead_saved") is not True:
+            # lead_saved:false БЕЗ needs_clarification = отказ сервиса/подписи —
+            # вечный цикл уточнений запрещён, показываем честную ошибку (S4)
+            log.warning("classify: lead_saved=false без уточнения: %r", result)
+            await safe_m_edit(
+                wait,
+                "Не удалось сохранить заявку: сервис не подтвердил запись (проверка подписи). "
+                "Попробуйте позже или напишите менеджеру.",
+            )
+            return
+        await safe_m_edit(
+            wait,
+            format_classify(result) + "\n\n✅ Заявка сохранена — она в мини-аппе («Мои заявки»).",
         )
-        await offer_consult(m, user)
+        await offer_consult(m, user, result.get("lead_id"))
 
 
 @dp.message(Command("classify"))
@@ -311,11 +345,8 @@ async def show_slots(m: Message) -> None:
     for s in slots[:20]:
         label = f"{s.get('label') or s.get('id')} {s.get('start') or ''}".strip()
         rows.append([InlineKeyboardButton(text=label, callback_data=cb_bytes_fit(f"book:{s['id']}"))])
-    if not rows:
-        await safe_answer(m, "Свободных слотов нет — всё разобрано.")
-        return
     kb = InlineKeyboardMarkup(inline_keyboard=rows)
-    await safe_answer(m, "Свободные слоты — нажми, чтобы записаться:", kb)
+    await safe_answer(m, format_slots(slots), kb)
 
 
 @dp.callback_query(F.data.startswith("book:"))
@@ -333,8 +364,11 @@ async def cb_book(q: CallbackQuery) -> None:
 
 
 
-async def offer_consult(m: Message, user: str) -> None:
-    """После сохранённой заявки — предложить слот консультации (пойдёт в заявку)."""
+async def offer_consult(m: Message, user: str, lead_id: str | None = None) -> None:
+    """После сохранённой заявки — предложить слот консультации (пойдёт в заявку).
+
+    lead_id — в какую заявку писать дату; без него фолбэк на последнюю открытую (M5).
+    """
     try:
         slots = await n8n.slots()
     except N8nError:
@@ -344,7 +378,8 @@ async def offer_consult(m: Message, user: str) -> None:
     rows = []
     for s in slots[:6]:
         label = "📅 " + (s.get("start") or s.get("id") or "?") + (f" {s['label']}" if s.get("label") else "")
-        rows.append([InlineKeyboardButton(text=label, callback_data=cb_bytes_fit(f"lc:{s['id']}"))])
+        cb = f"lc:{s['id']}" + (f":{lead_id}" if lead_id else "")
+        rows.append([InlineKeyboardButton(text=label, callback_data=cb_bytes_fit(cb))])
     rows.append([InlineKeyboardButton(text="Без консультации", callback_data="lc:skip")])
     await safe_answer(
         m,
@@ -355,7 +390,9 @@ async def offer_consult(m: Message, user: str) -> None:
 
 @dp.callback_query(F.data.startswith("lc:"))
 async def cb_lead_consult(q: CallbackQuery) -> None:
-    val = (q.data or "").split(":", 1)[1]
+    parts = (q.data or "").split(":")
+    val = parts[1] if len(parts) > 1 else ""
+    lead_id = parts[2] if len(parts) > 2 else None
     user = display_name(q.from_user)
     if val == "skip":
         await safe_edit(q, "Хорошо — менеджер свяжется с вами и согласует время.")
@@ -369,7 +406,7 @@ async def cb_lead_consult(q: CallbackQuery) -> None:
             return
         label = str((res.get("booking") or {}).get("start") or val)
         try:
-            await n8n.lead_date(user, label)
+            await n8n.lead_date(user, label, lead_id=lead_id)
         except N8nError:
             pass  # бронь есть, дату в заявку допишет менеджер
         text = f"✅ Заявка зарегистрирована. Консультация — {label}. Подробности в мини-аппе («Мои заявки»)."
@@ -377,6 +414,11 @@ async def cb_lead_consult(q: CallbackQuery) -> None:
         text = "Запись недоступна, попробуйте позже."
     await safe_edit(q, text)
     await q.answer()
+
+
+def get_user_id(u) -> int:
+    """Числовой id пользователя для ключей pending (в группе не склеиваем чужие заявки)."""
+    return int(getattr(u, "id", 0) or 0)
 
 
 def display_name(u) -> str:
@@ -424,10 +466,7 @@ async def cb_mycancel(q: CallbackQuery) -> None:
         )
     except N8nError:
         text = "Сервис недоступен, попробуйте позже."
-    try:
-        await q.message.edit_text(text)  # type: ignore[union-attr]
-    except Exception:  # noqa: BLE001
-        pass
+    await safe_edit(q, text)  # логирует сбои вместо молчаливого глотания (M5)
     await q.answer()
 
 

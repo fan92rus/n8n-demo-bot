@@ -1,49 +1,107 @@
 # n8n-demo-bot
 
 Демо-бот S-04 (витрина n8n-интеграций): Telegram-шелл, вся логика — в n8n-воркфлоу
-на демо-стенде (CT100, http://192.168.1.111:5678).
+на демо-стенде (CT100, http://192.168.1.111:5678). Публичный вход для бота и
+мини-аппа — https://funnyhome.netcraze.pro.
 
 Архитектура: aiogram long polling (только исходящие соединения — не нужны публичный
-IP, порты и TLS-сертификаты) → n8n webhooks по LAN.
+IP, порты и TLS-сертификаты) → n8n webhooks по LAN. Мини-апп отдаётся контейнером
+`miniapp-static` (nginx), наружу — через Traefik с Let's Encrypt.
 
-## Команды
+## Команды бота
 
 | Команда | Что делает | Воркфлоу n8n |
 |---|---|---|
-| `/start`, `/help` | меню | — |
-| `/classify <текст>` или просто текст | ИИ-классификатор заявки (категория/приоритет/суть) | demo-09 `/webhook/demo/classify` |
-| `/slots` | свободные слоты (inline-кнопки) | `/webhook/demo/slots` (в работе) |
-| `/book <id>` или кнопка | запись на слот | `/webhook/demo/book` (в работе) |
+| `/start` | меню + кнопка «🖥 Открыть мини-апп» (+ сброс незавершённого уточнения) | — |
+| `/help` | подсказка | — |
+| `/classify <текст>` или просто текст | ИИ-классификатор заявки (категория/приоритет/суть); туманная тема → уточняющий вопрос, далее заявка по двум сообщениям | demo-09 `/webhook/demo/classify` |
+| `/slots` или кнопка «📅 Слоты» | свободные слоты (inline-кнопки, запись в один клик) | demo-10 `/webhook/demo/slots` |
+| `/wizard` или кнопка «🪄 Подбор услуги» | подбор услуги за 3 клика; на финале подтверждает личность и подписывает бронь | demo-11 `/webhook/demo/wizard` |
+| `/my` или кнопка «🗂 Мои записи» | ваши записи и отмена (слот освобождается) | demo-10 `/webhook/demo/my`, `/webhook/demo/cancel` |
+
+`/book` как команды НЕТ: запись — кнопками под слотами (/slots) и в визарде.
+Меню-клавиатура: «🧾 Классификация», «📅 Слоты», «🪄 Подбор услуги», «🗂 Мои записи», «ℹ️ Помощь».
+
+## Мини-апп (Telegram WebApp)
+
+Страница https://funnyhome.netcraze.pro/ (CT100: nginx `stand/miniapp/` → Traefik).
+Возможности:
+- форма заявки (ИИ-классификация, приватные «Мои заявки»);
+- каталог услуг → свободные слоты → запись (услуга сохраняется в брони);
+- «📅 Мои записи» — видно и можно отменить свою бронь прямо здесь;
+- без initData (открытие вручную в браузере) — честные подсказки вместо
+  английского `unauthorized`: запись/заявки блокируются с инструкцией открыть
+  мини-апп через кнопку под сообщением `/start`.
+
+## Identity-модель
+
+Воркфлоу доверяют `user` только по подписи — голый `user` без подписи отклоняется (`unauthorized`):
+- бот шлёт `{user, sig}`, где `sig = HMAC-SHA256(DEMO_SIGN_SECRET, user)`;
+- мини-апп шлёт `{init_data}` — Telegram initData, `hash` сверяется по `BOT_TOKEN`
+  (data_check_string из сырых значений, разделитель `&`).
+
+Секреты (`BOT_TOKEN`, `DEMO_SIGN_SECRET`) живут в `/root/n8n-demo-bot.env` на CT100;
+в репозитории — плейсхолдеры `__BOT_TOKEN__`/`__SIGN_SECRET__`, подставляются при заливке
+воркфлоу в БД (`stand/patch_review_fixes.py --push-db`).
+
+## Слоты (единый источник)
+
+Слоты генерирует demo-10: **одна** функция `canonSlots()` в узлах «Слоты» и «Бронь»
+(12 рабочих дней вперёд, 10:00/14:00, Asia/Barnaul; занятые вычитаются). `/slots`
+отдаёт только свободные из этого окна, «Бронь» валидирует именно по нему — поэтому
+каждый слот из `/slots` можно забронировать (S1). Визард (demo-11) берёт слоты тем же
+запросом `/webhook/demo/slots`, т.е. занятые слоты не предлагаются (S2).
+Двойной тап по слоту — идемпотентный успех, «занято другим» — только если слот
+занял кто-то другой (S3). Балансировка ревью: `tests/test_workflows.py` проверяет,
+что блоки `canonSlots` в «Слоты» и «Бронь» побайтово совпадают.
+
+## Известные ограничения демо-стенда
+
+- **staticData не атомарный.** Брони и лиды хранятся в `getWorkflowStaticData('global')`
+  (per-workflow, пишется лениво, ~5 мин). Гонка воспроизводилась: 6 одновременных броней
+  одного слота дали 6 ответов `ok:true`, владельцем остался один. Для продакшена запись
+  должна идти в транзакционное хранилище (БД/Redis); демо это никак не перехитряет.
+- Данные живут в памяти исполнения n8n и возвращаются в БД не сразу; после рестарта
+  n8n возможна потеря последних изменений за последние ~5 минут.
+- У API нет удаления лидов: e2e-прогоны оставляют в staticData тестовые заявки.
+- Все demo-воркфлоу активны на одном инстансе; демо-запись идёт в общий пул слотов.
 
 ## Запуск
 
 ```bash
 pip install -r requirements.txt
-BOT_TOKEN=... N8N_BASE_URL=http://192.168.1.111:5678 python -m bot.main
+set -a; . ./.env; set +a   # BOT_TOKEN (не коммитить), DEMO_SIGN_SECRET, N8N_*, WEBAPP_URL
+python -m bot.main
 ```
+Без `BOT_TOKEN`/`DEMO_SIGN_SECRET` бот падает с `sys.exit(1)` (fail fast).
 
 ## Деплой (CT100)
 
+Бот:
 ```bash
-docker build -t n8n-demo-bot:latest .
+# scp кода в /root/n8n-demo-bot, затем:
+docker build -t n8n-demo-bot:latest /root/n8n-demo-bot
+docker rm -f n8n-demo-bot
 docker run -d --name n8n-demo-bot --restart unless-stopped \
   --env-file /root/n8n-demo-bot.env \
   -e N8N_BASE_URL=http://192.168.1.111:5678 n8n-demo-bot:latest
 ```
+Второго бота на том же токене не поднимать — long polling конфликтует.
 
-`/root/n8n-demo-bot.env`: `BOT_TOKEN=...` (секрет, вне git).
+Воркфлоу (после scp stand/*.json в /root/n8n-demo-bot/stand):
+```bash
+cd /root/n8n-demo-bot
+python3 stand/patch_review_fixes.py --json-only   # привести JSON к канону (идемпотентно)
+python3 stand/patch_review_fixes.py --push-db      # заливка в БД + подстановка секретов
+docker restart n8n                                 # перерегистрация вебхуков, ~60 сек
+```
+`patch_identity.py` — точечный identity-патч (тоже идемпотентный).
+Диагностика исполнений: `python3 stand/diag_exec.py [workflowId] [limit]`.
 
-## CI
+## CI и тесты
 
-Gitea Actions: ruff + pytest на каждый push в main/dev (`.gitea/workflows/build.yml`).
-
-## Тесты
-
-Клиент n8n и форматтеры покрыты unit-тестами на httpx.MockTransport — сеть и
-aiogram не нужны: `pytest -q`.
-
-## Мини-апп (Telegram WebApp)
-
-Страница: https://funnyhome.netcraze.pro/ — CT100: nginx (8091) → Traefik (Let's Encrypt, домен оператора).
-Бэкенд из страницы — те же n8n-вебхуки `/webhook/demo/*`: каталог услуг → слоты → запись → отмена.
-Кнопка «🖥 Открыть мини-апп» появляется в /start при заданном `WEBAPP_URL` (только https).
+Gitea Actions (.gitea/workflows/build.yml): ruff + pytest на push в main/dev и PR.
+- unit: `pytest -q` — 110 проверок; обработчики bot/main.py гоняются на поддельных
+  апдейтах и поддельном n8n (без Telegram и сети), воркфлоу — на JSON-инвариантах.
+- e2e живого стенда: `stand/test_integration.py` (слоты → бронь → визард confirm →
+  отмена → лиды → мини-апп initData).

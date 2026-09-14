@@ -173,3 +173,85 @@ async def test_slots_filters_bad_items():
     slots = await make_client(handler).slots()
     assert len(slots) == 1
     assert slots[0]["id"] == "2026-09-14-1000"
+
+
+@pytest.mark.asyncio
+async def test_signing_adds_sig_hmac():
+    """Бот подписывает user, когда задан sign_secret (identity-контракт)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        body = json.loads(request.content)
+        assert body["user"] == "@tester"
+        expected = N8nClient.sign_user("sekret", "@tester")
+        assert body["sig"] == expected
+        return httpx.Response(200, json={"ok": True})
+
+    client = N8nClient("http://n8n.test", transport=httpx.MockTransport(handler), sign_secret="sekret")
+    r = await client.book("s1", "@tester")
+    assert r["ok"] is True
+
+
+def test_sign_user_is_stable_hmac_sha256():
+    a = N8nClient.sign_user("sekret", "@tester")
+    b = N8nClient.sign_user("sekret", "@tester")
+    c = N8nClient.sign_user("sekret", "@other")
+    assert a == b and a != c
+    assert len(a) == 64
+
+
+@pytest.mark.asyncio
+async def test_lead_date_passes_lead_id():
+    import json
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body == {"user": "@tester", "date": "2026-09-21 10:00", "lead_id": "L42"}
+        return httpx.Response(200, json={"ok": True})
+
+    r = await make_client(handler).lead_date("@tester", "2026-09-21 10:00", lead_id="L42")
+    assert r["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_lead_date_without_lead_id_fallback():
+    import json
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert "lead_id" not in body
+        return httpx.Response(200, json={"ok": True})
+
+    r = await make_client(handler).lead_date("@tester", "2026-09-21 10:00")
+    assert r["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_dict_response_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=["not", "an", "object"])
+
+    with pytest.raises(N8nError):
+        await make_client(handler).wizard("start")
+
+
+@pytest.mark.asyncio
+async def test_my_cancel_methods():
+    import json
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        body = json.loads(request.content)
+        if request.url.path == "/webhook/demo/my":
+            assert body == {"user": "@tester"}
+            return httpx.Response(200, json={"ok": True, "bookings": []})
+        assert body == {"slot_id": "s1", "user": "@tester"}
+        return httpx.Response(200, json={"ok": True, "freed": "2026-09-16 10:00"})
+
+    c = make_client(handler)
+    assert (await c.my_bookings("@tester"))["ok"] is True
+    r = await c.cancel_booking("s1", "@tester")
+    assert r["freed"].startswith("2026-09-16")

@@ -61,9 +61,16 @@ class N8nClient:
     async def book(self, slot_id: str, user: str) -> dict:
         return await self._post("/webhook/demo/book", {"slot_id": slot_id, "user": user})
 
-    async def lead_date(self, user: str, date: str) -> dict:
-        """Проставить дату консультации последней открытой заявке пользователя."""
-        return await self._post("/webhook/demo/lead_date", {"user": user, "date": date})
+    async def lead_date(self, user: str, date: str, lead_id: str | None = None) -> dict:
+        """Проставить дату консультации в конкретную заявку.
+
+        lead_id — заявка, которую оформляли (M5: не писать дату в «последнюю»);
+        без lead_id воркфлоу использует последнюю открытую заявку пользователя.
+        """
+        payload: dict = {"user": user, "date": date}
+        if lead_id:
+            payload["lead_id"] = lead_id
+        return await self._post("/webhook/demo/lead_date", payload)
 
     async def wizard(self, sel: str, user: str | None = None) -> dict:
         """Один шаг wizard'а: sel='start' или состояние из callback_data (текст после 'wz:').

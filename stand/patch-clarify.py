@@ -2,7 +2,9 @@
 # (demo/lead_date), исходный текст заявки (source_msg). Запуск НА CT100:
 #   python3 stand/patch-clarify.py            # JSON + БД
 #   python3 stand/patch-clarify.py . --json-only   # только JSON (локально)
-import json, sqlite3, sys
+import json
+import sqlite3
+import sys
 
 BASE = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else '/root/n8n-demo-bot'
 JSON_ONLY = '--json-only' in sys.argv
@@ -73,5 +75,6 @@ hook = db.execute("SELECT method, webhookPath FROM webhook_entity WHERE workflow
 if not hook:
     db.execute("INSERT INTO webhook_entity (workflowId, webhookPath, method, node, webhookId, pathLength) VALUES (?,?,?,?,?,?)",
                (wid, 'lead_date', 'POST', 'Webhook lead_date', 'demo-lead-date', 1))
-db.commit(); db.close()
+db.commit()
+db.close()
 print('patched', wid, name)

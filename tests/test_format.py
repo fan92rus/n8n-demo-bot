@@ -42,3 +42,13 @@ def test_format_slots_none_labels():
 def test_format_classify_long_summary_capped():
     out = format_classify({"category": "бот", "priority": "высокий", "summary": "х" * 5000})
     assert len(out) < 2000
+
+
+def test_format_slots_skips_garbage_items():
+    out = format_slots([None, "мусор", 42, {"id": "s1", "label": "день", "start": "14:00"}])
+    assert "None" not in out and "день" in out
+
+
+def test_format_booking_non_dict_booking():
+    # {"ok":true,"booking":123} — booking не dict: короткое подтверждение без падения
+    assert "Записал" in format_booking({"ok": True, "booking": 123})

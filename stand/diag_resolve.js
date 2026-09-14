@@ -6,7 +6,7 @@ const dcs = Object.keys(params0).sort().map((k) => k + "=" + params0[k]).join("&
 const secret = crypto.createHmac("sha256", "WebAppData").update(tok).digest();
 const h = crypto.createHmac("sha256", secret).update(dcs).digest("hex");
 const init_data = dcs + "&hash=" + h;
-console.log("token len:", tok.length, "| token head:", tok.slice(0, 12));
+console.log("token loaded, len:", tok.length);
 const params = new URLSearchParams(init_data);
 const hash = String(params.get("hash") || "");
 params.delete("hash");

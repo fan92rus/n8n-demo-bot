@@ -1,4 +1,6 @@
-import json, sqlite3
+import json
+import sqlite3
+
 wf = json.load(open('/root/n8n-demo-bot/stand/demo-09-ai-classifier.json'))
 nodes = json.dumps(wf['nodes'], ensure_ascii=False)
 conns = json.dumps(wf['connections'], ensure_ascii=False)
@@ -11,5 +13,6 @@ wid, name, avid = target[0]
 assert avid, 'demo-09 не активирован'
 db.execute("UPDATE workflow_entity SET nodes=?, connections=? WHERE id=?", (nodes, conns, wid))
 n = db.execute("UPDATE workflow_history SET nodes=?, connections=? WHERE versionId=?", (nodes, conns, avid)).rowcount
-db.commit(); db.close()
+db.commit()
+db.close()
 print('patched', wid, name, 'history rows:', n)

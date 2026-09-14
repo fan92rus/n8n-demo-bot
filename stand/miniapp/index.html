@@ -35,7 +35,7 @@
 </head>
 <body>
   <h1>🖥 Демо-мини-апп</h1>
-  <div class="sub">Каталог → слот → запись, и ваши заявки. Бэкенд: n8n-воркфлоу, всё живьём.</div>
+  <div class="sub">Каталог → слот → запись; свои записи можно отменить здесь. Бэкенд: n8n-воркфлоу, всё живьём.</div>
 
   <div class="card">
     <b>✉️ Оставить заявку</b>
@@ -48,6 +48,11 @@
   <div class="card">
     <b>📋 Мои заявки</b> <a href="#" id="leads-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
     <div id="leads" class="muted" style="margin-top:6px">…</div>
+  </div>
+
+  <div class="card">
+    <b>📅 Мои записи</b> <a href="#" id="bookings-refresh" style="font-size:12px;color:#64b5f6">обновить</a>
+    <div id="bookings" class="muted" style="margin-top:6px">…</div>
   </div>
 
   <div class="card">
@@ -69,6 +74,7 @@ const SERVICES = [
   { id: 'integration',name: 'Интеграция',        desc: 'CRM, таблицы, уведомления' },
   { id: 'dev',        name: 'Разработка',        desc: 'Бот, мини-апп, бэкенд' },
 ];
+const SVC_NAMES = { consult: 'Консультация', integration: 'Интеграция', dev: 'Разработка' };
 let svc = null, slot = null, user = 'гость';
 let initData = ''; // подписанная Telegram строка — единственный доверенный identity
 
@@ -120,6 +126,10 @@ $('req-go').onclick = async () => {
 };
 
 async function loadLeads() {
+  if (!initData) {
+    $('leads').innerHTML = '<span class="err">⚠️ Нет подписи Telegram. Откройте мини-апп через кнопку «🖥 Открыть мини-апп» в /start — иначе заявки не сохраняются и не видны.</span>';
+    return;
+  }
   try {
     const d = await post('/demo/leads', { init_data: initData });
     const l = d.leads || [];
@@ -143,8 +153,9 @@ function renderServices() {
 async function loadSlots() {
   try {
     const d = await post('/demo/slots', {});
-    $('slots').innerHTML = (d.slots || []).length
-      ? (d.slots || []).map(s => `<div class="slot ${slot === s.id ? 'on' : ''}" data-id="${esc(s.id)}" data-label="${esc(s.label)} ${esc(s.start.slice(-5))}">${esc(s.label)}<br><span class="muted">${esc(s.start)}</span></div>`).join('')
+    const sl = (d.slots || []).map(s => ({ ...s, start: s.start || '' })); // M4: слот без start не роняет сетку
+    $('slots').innerHTML = sl.length
+      ? sl.map(s => `<div class="slot ${slot === s.id ? 'on' : ''}" data-id="${esc(s.id)}" data-label="${esc(s.label)} ${esc(s.start.slice(-5))}">${esc(s.label)}<br><span class="muted">${esc(s.start)}</span></div>`).join('')
       : '<span class="muted">Свободных слотов нет</span>';
     document.querySelectorAll('.slot').forEach(el =>
       el.onclick = () => { slot = slot === el.dataset.id ? null : el.dataset.id; loadSlots(); refreshGo(); });
@@ -154,23 +165,64 @@ async function loadSlots() {
 function refreshGo() { $('go').disabled = !(svc && slot); }
 
 $('go').onclick = async () => {
+  if (!initData) {
+    $('msg').innerHTML = '<span class="err">⚠️ Нет подписи Telegram — записаться не получится. Откройте мини-апп через кнопку «🖥 Открыть мини-апп» в /start.</span>';
+    refreshGo();
+    return;
+  }
   $('go').disabled = true;
   $('msg').innerHTML = 'Записываю…';
   try {
     const r = await post('/demo/book', { slot_id: slot, init_data: initData, service: svc });
-    $('msg').innerHTML = r.ok
-      ? `<span class="ok">✅ Записан: ${esc(r.booking && r.booking.start)}. Подтверждение — у бота.</span>`
-      : '<span class="err">' + esc(r.error || 'ошибка') + '</span>';
+    if (r.ok) {
+      $('msg').innerHTML = `<span class="ok">✅ Записан: ${esc((r.booking && r.booking.start) || '')}${r.booking && r.booking.svc ? ' · ' + esc(SVC_NAMES[r.booking.svc] || r.booking.svc) : ''}. Подтверждение — в «Моих записях».</span>`;
+      loadBookings();
+    } else {
+      $('msg').innerHTML = '<span class="err">' + esc(r.error || 'ошибка') + '</span>';
+    }
     slot = null; loadSlots();
   } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; }
   refreshGo();
 };
 
-renderServices(); loadSlots(); loadLeads(); refreshGo();
+/* ── Мои записи и отмена ── */
+async function loadBookings() {
+  if (!initData) {
+    $('bookings').innerHTML = '<span class="err">⚠️ Нет подписи Telegram. Откройте мини-апп через кнопку «🖥 Открыть мини-апп» в /start, чтобы видеть и отменять записи.</span>';
+    return;
+  }
+  try {
+    const d = await post('/demo/my', { init_data: initData });
+    const b = d.bookings || [];
+    $('bookings').innerHTML = b.length
+      ? b.map(x => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #2f3b4a">` +
+          `<span>📅 ${esc(x.start || '')}${x.svc ? ' · ' + esc(SVC_NAMES[x.svc] || x.svc) : ''}</span>` +
+          `<button style="width:auto;margin:0;padding:6px 12px" data-cancel="${esc(x.slot_id)}">Отменить</button></div>`).join('')
+      : 'Записей пока нет — выберите слот выше.';
+    document.querySelectorAll('[data-cancel]').forEach(el =>
+      el.onclick = async () => {
+        el.disabled = true;
+        try {
+          const r = await post('/demo/cancel', { slot_id: el.dataset.cancel, init_data: initData });
+          $('msg').innerHTML = r.ok
+            ? '<span class="ok">✅ Отменено. Слот снова свободен.</span>'
+            : '<span class="err">' + esc(r.error || 'не удалось отменить') + '</span>';
+          await loadBookings(); loadSlots();
+        } catch (e) { $('msg').innerHTML = '<span class="err">Сервис недоступен</span>'; el.disabled = false; }
+      });
+  } catch (e) { $('bookings').innerHTML = '<span class="err">Сервис недоступен</span>'; }
+}
+
+renderServices(); loadSlots(); loadLeads(); loadBookings(); refreshGo();
 $('leads-refresh').onclick = ev => { ev.preventDefault(); loadLeads(); };
+$('bookings-refresh').onclick = ev => { ev.preventDefault(); loadBookings(); };
+if (!initData) {
+  $('msg').innerHTML = '<span class="err">⚠️ Нет подписи Telegram. Откройте мини-апп через кнопку «🖥 Открыть мини-апп» в /start — запись, «Мои заявки» и «Мои записи» заработают.</span>';
+  refreshGo();
+}
 // Возврат в открытое окно мини-аппа — обновляем данные
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { loadSlots(); loadLeads(); }
+  if (document.visibilityState === 'visible') { loadSlots(); loadLeads(); loadBookings(); }
 });
 </script>
 </body>

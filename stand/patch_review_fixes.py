@@ -1,24 +1,17 @@
 #!/usr/bin/env python3
-"""Батч 2 фиксов по ревью (2026-09-12): demo-09/10/11.
+"""Батч-реконсиляция воркфлоу к каноническому состоянию репозитория (2026-09-14, ревью S-04).
 
-demo-09:
-  - Валидация: пустой/битый text не throw (HTTP 500), а ok:false; user ограничен 64.
-  - Новый узел IF «Пусто?»: пустой текст идёт straight на Ответ (LLM не тратится).
-  - Разбор ответа: срез ```-фенсов, строгая нормализация is_request/needs_clarification,
-    безопасный fallback (is_request:false вместо мусорного лида).
-  - LLM: options.timeout 30s.
-demo-10:
-  - Слоты: 12 рабочих дней (24 слота) вместо 6; барнаульская дата (+7ч к базе);
-    prune прошедших броней.
-  - Бронь: тот же +7ч сдвиг и prune.
-demo-11:
-  - genSlots: тот же +7h сдвиг; витрина слотов ограничена 12 (6 дней).
-  - confirm: реальный user из body.user (fallback wizard-demo).
-  - Бронь (demo-10): localhost -> 192.168.1.111.
+Идемпотентно и безопасно (S5):
+  - узлы приводятся к каноническим телам из stand/*.json (resolveUser при identity
+    никуда НЕ убирается — канон уже содержит его), повторный запуск — no-op;
+  - патч IF «Пусто?» использует equals (НЕ notEquals — иначе инверсия веток);
+  - самопроверка строгая: resolveUser в каждой нужной ноде, цепочки связей валидны,
+    единый источник слотов в demo-10 совпадает в «Слоты» и «Бронь».
 
-Использование: python patch_review_fixes.py --json-only  # правит локальные stand/*.json
-На CT100 импортируют patch() и применяют к живому JSON из БД (учётные данные не трогаются).
-Идемпотентно: наличие узла «Пусто?» и новые тела кода не применяются повторно.
+Использование:
+  python patch_review_fixes.py --json-only      # привести локальные stand/*.json
+  python patch_review_fixes.py --push-db        # на CT100: реконсиляция + заливка в БД
+  python patch_review_fixes.py                  # справка
 """
 from __future__ import annotations
 
@@ -27,128 +20,86 @@ import sys
 from pathlib import Path
 
 STAND = Path(__file__).resolve().parent
+if str(STAND.parent) not in sys.path:
+    sys.path.insert(0, str(STAND.parent))
 
-SLOTS_10 = """// Генерируем слоты на 12 рабочих дней вперёд (10:00 и 14:00), вычитаем занятые.
-// Барнаул = UTC+7: сдвигаем базу на +7ч и работаем в UTC-геттерах (календарь совпадает).
-const staticData = $getWorkflowStaticData('global');
-staticData.bookings = staticData.bookings || {};
-const booked = staticData.bookings;
-const slots = [];
-const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-for (const k of Object.keys(booked)) {
-  if (k.slice(0, 10) < today) delete booked[k];
+FILES = {
+    "demo-09": "demo-09-ai-classifier.json",
+    "demo-10": "demo-10-booking.json",
+    "demo-11": "demo-11-wizard.json",
 }
-let d = new Date(Date.now() + 7 * 3600 * 1000);
-while (slots.length < 24) {
-  d.setDate(d.getDate() + 1);
-  const dow = d.getDay();
-  if (dow === 0 || dow === 6) continue;
-  const day = d.toISOString().slice(0, 10);
-  for (const [h, label] of [['10:00', 'утро'], ['14:00', 'день']]) {
-    const id = day + '-' + h.replace(':', '');
-    if (booked[id]) continue;
-    slots.push({ id, label, start: day + ' ' + h + ' (' + label + ')', tz: 'Asia/Barnaul' });
-  }
-}
-return [{ json: { ok: true, slots } }];"""
 
-BOOK_10 = """// Бронь слота: слот обязан существовать в генерации (та же логика, что в ветке слотов), потом проверка занятости.
-// Барнаул = UTC+7: сдвигаем базу на +7ч (как в «Слоты»), прошлые брони подчищаем.
-const staticData = $getWorkflowStaticData('global');
-staticData.bookings = staticData.bookings || {};
-const body = $input.first().json.body || {};
-const slotId = String(body.slot_id || '');
-const user = String(body.user || 'unknown').slice(0, 64);
-const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-for (const k of Object.keys(staticData.bookings)) {
-  if (k.slice(0, 10) < today) delete staticData.bookings[k];
+NODES_JS = {
+    "demo-09": ["Валидация", "Разбор ответа", "Лид-захват", "Лиды", "Присвоить дату"],
+    "demo-10": ["Слоты", "Бронь", "Мои записи", "Отмена"],
+    "demo-11": ["Маршрут wizard"],
 }
-const valid = {};
-const d = new Date(Date.now() + 7 * 3600 * 1000);
-let made = 0;
-while (made < 12) {
-  d.setDate(d.getDate() + 1);
-  const dow = d.getDay();
-  if (dow === 0 || dow === 6) continue;
-  const day = d.toISOString().slice(0, 10);
-  for (const [h, label] of [['10:00', 'утро'], ['14:00', 'день']]) {
-    valid[day + '-' + h.replace(':', '')] = day + ' ' + h + ' (' + label + ')';
-  }
-  made += 1;
-}
-if (!valid[slotId]) {
-  return [{ json: { ok: false, error: 'слот не найден — запросите /slots' } }];
-}
-if (staticData.bookings[slotId]) {
-  return [{ json: { ok: false, error: 'слот уже занят' } }];
-}
-staticData.bookings[slotId] = { user, at: new Date().toISOString() };
-const day = slotId.slice(0, 10);
-const hh = slotId.slice(11, 13) + ':' + slotId.slice(13, 15);
-return [{ json: { ok: true, booking: { slot_id: slotId, label: day, start: day + ' ' + hh, user } } }];"""
 
-VALIDATE_09 = """const body = $input.first().json.body || {};
-const text = String(body.text || '').slice(0, 2000);
-if (!text.trim()) {
-  // пустой текст — честный ответ вместо HTTP 500
-  return [{ json: { ok: false, error: 'Опишите задачу — отправьте текст заявки' } }];
-}
-return [{ json: { text, user: String(body.user || 'аноним').slice(0, 64) } }];"""
-
-PARSE_09 = """const r = $input.first().json;
-let content = '';
-try { content = String(r.choices[0].message.content || ''); } catch (e) {}
-// LLM любит заворачивать JSON в ```-фенсы — срезаем
-content = content.replace(/^```(?:json)?\\s*/i, '').replace(/```\\s*$/, '').trim();
-let parsed = null;
-try { parsed = JSON.parse(content); } catch (e) {}
-if (!parsed || typeof parsed !== 'object') {
-  // не ломаемся в мусорный лид: безопасный «не заявка» с подсказкой
-  return [{ json: { ok: true, category: 'прочее', priority: 'средний',
-    summary: 'не удалось разобрать ответ модели — попробуйте переформулировать',
-    is_request: false, needs_clarification: false, clarify_question: '', lead_saved: false } }];
-}
-parsed.is_request = parsed.is_request === true || parsed.is_request === 'true';
-parsed.needs_clarification = parsed.needs_clarification === true || parsed.needs_clarification === 'true';
-parsed.clarify_question = String(parsed.clarify_question || '');
-return [{ json: { ok: true, ...parsed } }];"""
-
-IF_EMPTY = {
-    "parameters": {
-        "conditions": {
-            "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose"},
-            "conditions": [
-                {
-                    "leftValue": "={{ String($json.ok === false) }}",
-                    "rightValue": "true",
-                    "operator": {"type": "string", "operation": "notEquals"},
-                }
-            ],
-            "combinator": "and",
-        },
-        "options": {},
-    },
-    "type": "n8n-nodes-base.if",
-    "typeVersion": 2,
-    "position": [340, 0],
-    "id": "if-empty-09",
-    "name": "Пусто?",
+REQUIRED_RESOLVE_USER = {
+    "demo-09": ["Валидация", "Лиды", "Присвоить дату"],
+    "demo-10": ["Бронь", "Мои записи", "Отмена"],
+    "demo-11": ["Маршрут wizard"],
 }
 
 
-def patch_09(wf: dict) -> dict:
-    nodes = {n["name"]: n for n in wf["nodes"]}
-    nodes["Валидация"]["parameters"]["jsCode"] = VALIDATE_09
-    nodes["Разбор ответа"]["parameters"]["jsCode"] = PARSE_09
-    llm = nodes["LLM"]["parameters"]
-    opts = llm.get("options") or {}
-    if not opts.get("timeout"):
-        opts["timeout"] = 30000
-        llm["options"] = opts
-    names = [n["name"] for n in wf["nodes"]]
-    if "Пусто?" not in names:
-        wf["nodes"].append(dict(IF_EMPTY))
-        # перепрошивка цепочки: Валидация -> Пусто?; true -> Ответ; false -> LLM
+def _name_index(wf: dict) -> dict:
+    return {n["name"]: n for n in wf["nodes"]}
+
+
+def load_canonical(wid: str) -> dict:
+    return json.loads((STAND / FILES[wid]).read_text(encoding="utf-8"))
+
+
+def sync_js(wf: dict, src: dict, names: list[str]) -> list[str]:
+    """Привести jsCode узлов к канону; вернуть список изменённых."""
+    idx, sidx = _name_index(wf), _name_index(src)
+    changed = []
+    for name in names:
+        if name not in sidx:
+            continue  # в каноне узла нет — не трогаем
+        body = sidx[name]["parameters"].get("jsCode")
+        if body is None:
+            continue
+        if name not in idx:
+            wf["nodes"].append(_copy_node(sidx[name]))
+            changed.append(f"+{name}")
+            idx = _name_index(wf)
+            continue
+        if idx[name]["parameters"].get("jsCode") != body:
+            idx[name]["parameters"]["jsCode"] = body
+            changed.append(name)
+    return changed
+
+
+def _copy_node(src_node: dict) -> dict:
+    return json.loads(json.dumps(src_node))
+
+
+def reconcile_09(wf: dict, src: dict) -> list[str]:
+    changed = sync_js(wf, src, NODES_JS["demo-09"])
+    idx = _name_index(wf)
+    # LLM timeout
+    llm = idx.get("LLM")
+    if llm is not None:
+        opts = dict(llm["parameters"].get("options") or {})
+        if opts.get("timeout") != 30000:
+            opts["timeout"] = 30000
+            llm["parameters"]["options"] = opts
+            changed.append("LLM.timeout")
+    # IF «Пусто?»: equals (не notEquals!) и соединения Валидация→Пусто?→(Ответ|LLM)
+    if "Пусто?" in idx:
+        op = idx["Пусто?"]["parameters"]["conditions"]["conditions"][0]["operator"]["operation"]
+        if op != "equals":
+            idx["Пусто?"]["parameters"]["conditions"]["conditions"][0]["operator"]["operation"] = "equals"
+            changed.append("Пусто?.operator→equals")
+    else:
+        src_if = _name_index(src).get("Пусто?")
+        if src_if is not None:
+            wf["nodes"].append(_copy_node(src_if))
+            changed.append("+Пусто?")
+            idx = _name_index(wf)
+    names = set(idx)
+    if "Пусто?" in names:
         wf["connections"]["Валидация"] = {"main": [[{"node": "Пусто?", "type": "main", "index": 0}]]}
         wf["connections"]["Пусто?"] = {
             "main": [
@@ -156,78 +107,124 @@ def patch_09(wf: dict) -> dict:
                 [{"node": "LLM", "type": "main", "index": 0}],
             ]
         }
-    return wf
+    return changed
 
 
-def patch_10(wf: dict) -> dict:
-    nodes = {n["name"]: n for n in wf["nodes"]}
-    nodes["Слоты"]["parameters"]["jsCode"] = SLOTS_10
-    nodes["Бронь"]["parameters"]["jsCode"] = BOOK_10
-    return wf
+def reconcile_10(wf: dict, src: dict) -> list[str]:
+    return sync_js(wf, src, NODES_JS["demo-10"])
 
 
-def patch_11(wf: dict) -> dict:
-    nodes = {n["name"]: n for n in wf["nodes"]}
-    route = nodes["Маршрут wizard"]
-    code = route["parameters"]["jsCode"]
-    if "Date.now() + 7 * 3600" not in code:
-        code = code.replace(
-            "  const valid = [];\n  const d = new Date();",
-            "  const valid = [];\n  const d = new Date(Date.now() + 7 * 3600 * 1000);",
-        )
-    if "genSlots().slice(0, 12)" not in code:
-        code = code.replace("const slots = genSlots();", "const slots = genSlots().slice(0, 12);")
-    if "body.user" not in code:
-        old = "out = { stage: 'book', slot_id: slotId, user: 'wizard-demo (' + (services[svc] || svc) + ')' };"
-        new = (
-            "const u = String(body.user || '').trim().slice(0, 64);\n"
-            "  out = { stage: 'book', slot_id: slotId, user: u || ('wizard-demo (' + (services[svc] || svc) + ')') };"
-        )
-        code = code.replace(old, new)
-    route["parameters"]["jsCode"] = code
-    book = nodes["Бронь (demo-10)"]["parameters"]
-    if "localhost:5678" in str(book.get("url", "")):
-        book["url"] = str(book["url"]).replace("http://localhost:5678", "http://192.168.1.111:5678")
-    return wf
+def reconcile_11(wf: dict, src: dict) -> list[str]:
+    changed = sync_js(wf, src, NODES_JS["demo-11"])
+    idx = _name_index(wf)
+    # http-узел брони: jsonBody с sig и service
+    book = idx.get("Бронь (demo-10)")
+    sbook = _name_index(src).get("Бронь (demo-10)")
+    if book is not None and sbook is not None:
+        if book["parameters"].get("jsonBody") != sbook["parameters"]["jsonBody"]:
+            book["parameters"]["jsonBody"] = sbook["parameters"]["jsonBody"]
+            changed.append("Бронь (demo-10).jsonBody")
+    # новые узлы (слоты из demo-10) — добавляем идемпотентно
+    for name in ("Нужны слоты?", "Слоты (demo-10)", "Шаг слотов"):
+        if name not in idx and name in _name_index(src):
+            wf["nodes"].append(_copy_node(_name_index(src)[name]))
+            changed.append(f"+{name}")
+    idx = _name_index(wf)
+    if "Нужны слоты?" in idx:
+        wf["connections"]["Это бронь?"] = {
+            "main": [
+                [{"node": "Бронь (demo-10)", "type": "main", "index": 0}],
+                [{"node": "Нужны слоты?", "type": "main", "index": 0}],
+            ]
+        }
+        wf["connections"]["Нужны слоты?"] = {
+            "main": [
+                [{"node": "Слоты (demo-10)", "type": "main", "index": 0}],
+                [{"node": "Ответ wizard", "type": "main", "index": 0}],
+            ]
+        }
+        wf["connections"]["Слоты (demo-10)"] = {"main": [[{"node": "Шаг слотов", "type": "main", "index": 0}]]}
+        wf["connections"]["Шаг слотов"] = {"main": [[{"node": "Ответ wizard", "type": "main", "index": 0}]]}
+    return changed
+
+
+RECONCILE = {"demo-09": reconcile_09, "demo-10": reconcile_10, "demo-11": reconcile_11}
 
 
 def patch(wid: str, wf: dict) -> dict:
+    src = load_canonical(wid)
+    changed = RECONCILE[wid](wf, src)
+    for name in NODES_JS[wid]:
+        if name in _name_index(src) and name not in _name_index(wf):
+            raise RuntimeError(f"{wid}: узел {name} отсутствует после реконсиляции")
+    if changed:
+        print(f"{wid}: обновлено: {', '.join(changed)}")
+    else:
+        print(f"{wid}: уже каноническое состояние")
+    return wf
+
+
+def selfcheck(wid: str, wf: dict) -> None:
+    idx = _name_index(wf)
+    names = set(idx)
+    for name in REQUIRED_RESOLVE_USER[wid]:
+        assert name in names, f"{wid}: нет узла {name}"
+        code = idx[name]["parameters"].get("jsCode", "")
+        assert "function resolveUser" in code, f"{wid}/{name}: resolveUser отсутствует"
+        assert code.count("resolveUser(") >= 2 or name == "Бронь", f"{wid}/{name}: resolveUser не вызван"
     if wid == "demo-09":
-        return patch_09(wf)
+        op = idx["Пусто?"]["parameters"]["conditions"]["conditions"][0]["operator"]["operation"]
+        assert op == "equals", "demo-09: IF «Пусто?» не equals"
+        vcode = idx["Валидация"]["parameters"]["jsCode"]
+        assert "'аноним'" not in vcode, "demo-09: анонимный фолбэк снят"
+        assert "unauthorized" in idx["Валидация"]["parameters"]["jsCode"], "demo-09: нет отказов unauthorized"
+        c = wf["connections"]
+        assert c["Валидация"]["main"][0][0]["node"] == "Пусто?"
+        assert c["Пусто?"]["main"][0][0]["node"] == "Ответ"
+        assert c["Пусто?"]["main"][1][0]["node"] == "LLM"
     if wid == "demo-10":
-        return patch_10(wf)
+        slots, book = idx["Слоты"]["parameters"]["jsCode"], idx["Бронь"]["parameters"]["jsCode"]
+        assert "ЕДИНЫЙ ИСТОЧНИК СЛОТОВ" in slots and "ЕДИНЫЙ ИСТОЧНИК СЛОТОВ" in book
+        assert "existing.user === user" in book and "idempotent: true" in book, "demo-10: идемпотентность S3"
+        assert "canonSlots" in slots and "canonSlots" in book, "demo-10: единый генератор"
     if wid == "demo-11":
-        return patch_11(wf)
-    raise SystemExit(f"unknown workflow id: {wid}")
+        route = idx["Маршрут wizard"]["parameters"]["jsCode"]
+        assert "__SIGN_SECRET__" in route and "createHmac" in route, "demo-11: sig в confirm (B1)"
+        body = idx["Бронь (demo-10)"]["parameters"]["jsonBody"]
+        assert "sig" in body and "service" in body, "demo-11: sig/service не прокидываются"
+        for name in ("Нужны слоты?", "Слоты (demo-10)", "Шаг слотов"):
+            assert name in names, f"demo-11: нет узла {name}"
+    # общая проверка связей: все ноды существуют
+    for src_name, conn in wf["connections"].items():
+        assert src_name in names, f"{wid}: источник связи {src_name} не найден"
+        for branch in conn.get("main") or []:
+            for target in branch or []:
+                assert target["node"] in names, f"{wid}: связь {src_name}→{target['node']} в никуда"
 
 
-def main() -> None:
-    files = {
-        "demo-09": STAND / "demo-09-ai-classifier.json",
-        "demo-10": STAND / "demo-10-booking.json",
-        "demo-11": STAND / "demo-11-wizard.json",
-    }
-    for wid, path in files.items():
-        wf = json.loads(path.read_text(encoding="utf-8"))
+def main() -> int:
+    json_only = "--json-only" in sys.argv
+    push = "--push-db" in sys.argv
+    if not json_only and not push:
+        print("использование: --json-only | --push-db")
+        return 2
+    for wid, fname in FILES.items():
+        wf = json.loads((STAND / fname).read_text(encoding="utf-8"))
         wf = patch(wid, wf)
-        path.write_text(json.dumps(wf, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"patched {wid} -> {path.name}")
-    # само-проверки
-    wf09 = json.loads(files["demo-09"].read_text(encoding="utf-8"))
-    names = [n["name"] for n in wf09["nodes"]]
-    assert "Пусто?" in names and "throw new Error" not in json.dumps(wf09["nodes"], ensure_ascii=False)
-    c = wf09["connections"]
-    assert c["Пусто?"]["main"][0][0]["node"] == "Ответ" and c["Пусто?"]["main"][1][0]["node"] == "LLM"
-    wf10 = json.loads(files["demo-10"].read_text(encoding="utf-8"))
-    assert "length < 24" in json.dumps(wf10["nodes"], ensure_ascii=False)
-    wf11 = json.loads(files["demo-11"].read_text(encoding="utf-8"))
-    s = json.dumps(wf11["nodes"], ensure_ascii=False)
-    assert "body.user" in s and "localhost:5678" not in s
-    print("asserts OK")
+        selfcheck(wid, wf)
+        (STAND / fname).write_text(json.dumps(wf, ensure_ascii=False), encoding="utf-8")
+        print(f"{wid}: selfcheck OK")
+    if push:
+        from stand.deploy_db import load_env_secrets, push_to_db  # noqa: PLC0415
+
+        wfs = {
+            wid: json.loads((STAND / fname).read_text(encoding="utf-8"))
+            for wid, fname in FILES.items()
+        }
+        push_to_db(wfs, load_env_secrets())
+        print("БД залита; перезапустите n8n для регистрации вебхуков")
+    return 0
 
 
 if __name__ == "__main__":
-    if "--json-only" in sys.argv:
-        main()
-    else:
-        print("import patch() for DB-side use")
+    raise SystemExit(main())
